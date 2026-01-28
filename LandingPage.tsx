@@ -1,0 +1,160 @@
+import React from 'react';
+
+const LandingPage: React.FC = () => {
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 overflow-hidden">
+      <div className="relative">
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(1200px 600px at 20% 10%, rgba(14, 116, 144, 0.25), transparent 60%), radial-gradient(900px 500px at 80% 20%, rgba(74, 222, 128, 0.18), transparent 55%), linear-gradient(180deg, rgba(2,6,23,1) 0%, rgba(3,7,18,1) 60%, rgba(2,6,23,1) 100%)'
+          }}
+        />
+        <div className="absolute inset-0 opacity-40" style={{ backgroundImage: 'linear-gradient(90deg, rgba(148,163,184,0.08) 1px, transparent 1px), linear-gradient(0deg, rgba(148,163,184,0.08) 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
+        <div className="relative">
+          <header className="mx-auto max-w-6xl px-6 pt-8">
+            <div className="flex items-center justify-between rounded-2xl border border-slate-800/60 bg-slate-950/70 px-4 py-3 shadow-xl shadow-slate-950/40 backdrop-blur">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-emerald-500/20 ring-1 ring-emerald-400/30 flex items-center justify-center">
+                  <span className="text-emerald-300 text-lg font-bold" style={{ fontFamily: '"Space Grotesk", "Trebuchet MS", sans-serif' }}>U</span>
+                </div>
+                <div>
+                  <div className="text-sm uppercase tracking-[0.3em] text-slate-400">Ultiplan</div>
+                  <div className="text-xs text-slate-500">Ultimate playbook builder</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] uppercase tracking-[0.35em] text-emerald-300/80">Free Forever</span>
+                <a
+                  href="#/app"
+                  className="px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest bg-emerald-500 text-emerald-950 shadow-lg shadow-emerald-500/30 hover:bg-emerald-400 transition-colors"
+                >
+                  Open App
+                </a>
+              </div>
+            </div>
+          </header>
+
+          <main className="mx-auto max-w-6xl px-6 pb-24">
+            <section className="pt-16 pb-12 grid lg:grid-cols-[1.1fr_0.9fr] gap-12 items-center">
+              <div>
+                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[10px] uppercase tracking-[0.35em] text-emerald-200">
+                  Built for ultimate captains
+                </div>
+                <h1
+                  className="mt-6 text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight text-slate-50"
+                  style={{ fontFamily: '"Space Grotesk", "Trebuchet MS", sans-serif' }}
+                >
+                  Design, animate, and share elite ultimate frisbee plays.
+                </h1>
+                <p className="mt-5 text-base sm:text-lg text-slate-300 max-w-xl">
+                  Ultiplan is a free, fast playbook for mapping offensive sets, drawing cuts, and visualizing timing in seconds.
+                </p>
+                <div className="mt-8 flex flex-wrap items-center gap-4">
+                  <a
+                    href="#/app"
+                    className="px-6 py-3 rounded-2xl text-xs sm:text-sm font-bold uppercase tracking-[0.3em] bg-emerald-500 text-emerald-950 shadow-xl shadow-emerald-500/30 hover:bg-emerald-400 transition-colors"
+                  >
+                    Start Building
+                  </a>
+                  <div className="text-xs text-slate-400 uppercase tracking-[0.35em]">No signup • Free forever</div>
+                </div>
+                <div className="mt-10 max-w-md text-xs text-slate-400">
+                  <div className="rounded-2xl border border-slate-800/60 bg-slate-950/60 p-4">
+                    <div className="text-emerald-300 text-lg font-semibold" style={{ fontFamily: '"Space Grotesk", "Trebuchet MS", sans-serif' }}>Live</div>
+                    <div className="uppercase tracking-widest text-[10px]">timing previews</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="relative">
+                <div className="absolute -inset-6 rounded-[32px] bg-gradient-to-tr from-emerald-500/20 via-slate-900/0 to-cyan-400/20 blur-2xl" />
+                <div className="relative rounded-[28px] border border-slate-800/60 bg-slate-900/50 p-3 shadow-2xl">
+                  <video
+                    src="/screenshots/breakside-attack.mov"
+                    poster="/screenshots/breakside-attack.png"
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="w-full rounded-[22px] border border-slate-800"
+                  />
+                </div>
+              </div>
+            </section>
+
+            <section className="py-10">
+              <div className="flex items-center justify-between mb-8">
+                <h2 className="text-2xl sm:text-3xl font-bold" style={{ fontFamily: '"Space Grotesk", "Trebuchet MS", sans-serif' }}>
+                  Everything you need, none of the clutter.
+                </h2>
+                <div className="hidden sm:block text-xs uppercase tracking-[0.35em] text-slate-500">Features</div>
+              </div>
+              <div className="grid md:grid-cols-3 gap-6">
+                {[
+                  {
+                    title: 'Preset formations',
+                    copy: 'Drop a vertical, side, or ho stack and tweak roles instantly.',
+                  },
+                  {
+                    title: 'Auto-assign defense',
+                    copy: 'Auto-assign defenders to get first-pass placement easily.',
+                  },
+                  {
+                    title: 'Play clock',
+                    copy: 'Run with a play clock to spot spacing and timing issues fast.',
+                  }
+                ].map(feature => (
+                  <div key={feature.title} className="rounded-2xl border border-slate-800/70 bg-slate-950/60 p-6 shadow-xl shadow-slate-950/30">
+                    <div className="text-sm font-semibold text-slate-100" style={{ fontFamily: '"Space Grotesk", "Trebuchet MS", sans-serif' }}>
+                      {feature.title}
+                    </div>
+                    <p className="mt-3 text-sm text-slate-400">{feature.copy}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section className="py-12">
+              <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/60 p-6 md:p-8 shadow-2xl">
+                <div className="grid lg:grid-cols-[0.9fr_1.1fr] gap-8 items-center">
+                  <div>
+                    <div className="text-xs uppercase tracking-[0.35em] text-emerald-300">Screenshots</div>
+                    <h3 className="mt-3 text-2xl sm:text-3xl font-bold" style={{ fontFamily: '"Space Grotesk", "Trebuchet MS", sans-serif' }}>
+                      Show the flow before you step on the line.
+                    </h3>
+                    <p className="mt-4 text-sm text-slate-400">
+                      Capture the full set, then share the visual with your line. Swap in more screenshots anytime.
+                    </p>
+                    <a
+                      href="#/app"
+                      className="mt-6 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.3em] text-emerald-300 hover:text-emerald-200"
+                    >
+                      Open the builder →
+                    </a>
+                  </div>
+                  <div className="grid gap-4">
+                    <div className="rounded-2xl border border-slate-800 overflow-hidden">
+                      <img src="/screenshots/breakside-attack.png" alt="Ultiplan screenshot detail" className="w-full" />
+                    </div>
+                    <div className="grid sm:grid-cols-2 gap-4">
+                      <div className="rounded-2xl border border-slate-800/70 bg-slate-950/80 h-36 flex items-center justify-center text-xs uppercase tracking-[0.35em] text-slate-600">
+                        Drop another screenshot
+                      </div>
+                      <div className="rounded-2xl border border-slate-800/70 bg-slate-950/80 h-36 flex items-center justify-center text-xs uppercase tracking-[0.35em] text-slate-600">
+                        Or a drill card
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </main>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default LandingPage;

@@ -119,7 +119,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex-1 p-5 overflow-y-auto custom-scrollbar">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-            <BookOpen size={14} /> Step 6 · Tactical Notes
+            <BookOpen size={14} /> Tactical Notes
           </h3>
           <button 
             onClick={() => setIsEditingNotes(!isEditingNotes)}
