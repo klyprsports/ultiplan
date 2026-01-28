@@ -1,0 +1,5 @@
+{
+  "name": "UltiPlan - Ultimate Frisbee Playbook",
+  "description": "A high-fidelity strategy board for Ultimate Frisbee coaches and players. Design plays, draw routes, and get AI-powered strategy analysis using Gemini.",
+  "requestFramePermissions": []
+}
