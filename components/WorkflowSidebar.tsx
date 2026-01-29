@@ -9,6 +9,8 @@ interface WorkflowSidebarProps {
   activeFormation: 'vertical' | 'side' | 'ho' | 'custom' | null;
   setActiveFormation: (formation: 'vertical' | 'side' | 'ho' | 'custom' | null) => void;
   setMode: (mode: InteractionMode) => void;
+  playName: string;
+  onPlayNameChange: (name: string) => void;
   force: Force;
   onForceChange: (force: Force) => void;
   savedFormations: Formation[];
@@ -40,6 +42,8 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
   activeFormation,
   setActiveFormation,
   setMode,
+  playName,
+  onPlayNameChange,
   force,
   onForceChange,
   savedFormations,
@@ -68,6 +72,17 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
 
   return (
     <div className="w-72 bg-slate-900 border-r border-slate-800 flex flex-col py-6 px-5 gap-6 shrink-0 z-10 shadow-2xl overflow-y-auto custom-scrollbar">
+      <div>
+        <div className="text-[10px] text-slate-500 uppercase tracking-widest">Play Name</div>
+        <input
+          type="text"
+          value={playName}
+          onChange={(e) => onPlayNameChange(e.target.value)}
+          className="mt-2 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100 font-semibold tracking-tight focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+          placeholder="Enter Play Name"
+        />
+      </div>
+
       <div>
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Step 1 · Set Up Offense</h3>
@@ -176,8 +191,6 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
           <div className="grid grid-cols-2 gap-2">
             <button onClick={() => onForceChange('home')} className={`px-2 py-1 rounded transition-all ${force === 'home' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200 bg-slate-900/40'}`}>HOME</button>
             <button onClick={() => onForceChange('away')} className={`px-2 py-1 rounded transition-all ${force === 'away' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200 bg-slate-900/40'}`}>AWAY</button>
-            <button onClick={() => onForceChange('middle')} className={`px-2 py-1 rounded transition-all ${force === 'middle' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200 bg-slate-900/40'}`}>MIDDLE</button>
-            <button onClick={() => onForceChange('sideline')} className={`px-2 py-1 rounded transition-all ${force === 'sideline' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200 bg-slate-900/40'}`}>SIDE</button>
           </div>
         </div>
       </div>

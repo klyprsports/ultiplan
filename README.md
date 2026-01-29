@@ -12,7 +12,23 @@ Ultiplan is a lightweight, browser-based playbook for designing and animating ul
 - Per-player speed and acceleration controls to model timing.
 - Auto-D to generate defender matchups from offense positions.
 - Tactical notes with a simple markdown-lite formatter.
-- Playbook with save/load/delete (stored in browser localStorage).
+- Playbook with save/load/delete (stored in browser localStorage for now).
+
+## Firebase setup
+
+1. Copy `.env.example` to `.env.local` and fill in your Firebase web app config.
+2. Install Firebase CLI and initialize (recommended: Firestore, Auth, Storage, Hosting).
+3. Run emulators locally:
+
+```bash
+firebase emulators:start
+```
+
+4. Start the app:
+
+```bash
+npm run dev
+```
 
 ## Tech Stack
 - React + TypeScript + Vite

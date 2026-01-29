@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Trash2, ArrowLeft, BookOpen, LayoutGrid } from 'lucide-react';
+import { Trash2, BookOpen, LayoutGrid, Menu } from 'lucide-react';
 import { Formation, Play, Player } from './types';
 import {
   loadFormationsFromStorage,
@@ -8,6 +8,9 @@ import {
   savePlaysToStorage,
   setPendingSelection
 } from './services/storage';
+import { ensureAnonymousAuth, signInWithGoogle, signOutUser, subscribeToAuth } from './services/auth';
+import { deleteFormationFromFirestore, deletePlayFromFirestore, fetchFormations, fetchPlays, isFirestoreEnabled, saveFormationToFirestore, savePlayToFirestore } from './services/firestore';
+import { User } from 'firebase/auth';
 
 const FIELD_WIDTH = 40;
 const FIELD_HEIGHT = 110;
@@ -84,6 +87,8 @@ const PlaybookPage: React.FC = () => {
   const [tab, setTab] = useState<'plays' | 'formations'>('plays');
   const [savedPlays, setSavedPlays] = useState<Play[]>([]);
   const [savedFormations, setSavedFormations] = useState<Formation[]>([]);
+  const [user, setUser] = useState<User | null>(null);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const navigate = useCallback((path: string) => {
     window.history.pushState({}, '', path);
@@ -96,6 +101,13 @@ const PlaybookPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    const unsubscribe = subscribeToAuth(setUser);
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
     savePlaysToStorage(savedPlays);
   }, [savedPlays]);
 
@@ -103,12 +115,54 @@ const PlaybookPage: React.FC = () => {
     saveFormationsToStorage(savedFormations);
   }, [savedFormations]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadRemote = async () => {
+      if (!isFirestoreEnabled()) return;
+      try {
+        await ensureAnonymousAuth();
+        if (cancelled) return;
+        const [remotePlays, remoteFormations] = await Promise.all([fetchPlays(), fetchFormations()]);
+        if (cancelled) return;
+        if (remotePlays.length > 0 || remoteFormations.length > 0) {
+          setSavedPlays(remotePlays);
+          setSavedFormations(remoteFormations);
+        } else {
+          const localPlays = loadPlaysFromStorage();
+          const localFormations = loadFormationsFromStorage();
+          if (localPlays.length > 0 || localFormations.length > 0) {
+            await Promise.all([
+              ...localPlays.map((play) => savePlayToFirestore(play)),
+              ...localFormations.map((formation) => saveFormationToFirestore(formation))
+            ]);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load playbook from Firestore', error);
+      }
+    };
+    loadRemote();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const deletePlay = (id: string) => {
     setSavedPlays((prev) => prev.filter((p) => p.id !== id));
+    if (isFirestoreEnabled()) {
+      ensureAnonymousAuth()
+        .then(() => deletePlayFromFirestore(id))
+        .catch((error) => console.error('Failed to delete play from Firestore', error));
+    }
   };
 
   const deleteFormation = (id: string) => {
     setSavedFormations((prev) => prev.filter((f) => f.id !== id));
+    if (isFirestoreEnabled()) {
+      ensureAnonymousAuth()
+        .then(() => deleteFormationFromFirestore(id))
+        .catch((error) => console.error('Failed to delete formation from Firestore', error));
+    }
   };
 
   const openPlay = (id: string) => {
@@ -134,27 +188,55 @@ const PlaybookPage: React.FC = () => {
             <img src="/icons/ultiplay-icon.png" alt="Ultiplan icon" className="h-full w-full object-contain" />
           </div>
           <div>
-            <div className="text-sm font-bold tracking-tight flex items-center gap-2">
-              <BookOpen size={16} className="text-emerald-400" />
+            <div className="text-lg font-bold tracking-tight text-white">Ultiplan</div>
+            <div className="text-[10px] text-slate-400 flex items-center gap-2">
+              <BookOpen size={12} className="text-emerald-400" />
               Playbook
             </div>
-            <div className="text-[10px] text-slate-400">Saved plays and formations</div>
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={() => navigate('/')}
-            className="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-widest border border-slate-700 bg-slate-900 hover:bg-slate-800 text-slate-300"
-          >
-            Home
-          </button>
-          <button
-            onClick={() => navigate('/builder')}
-            className="px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-widest bg-emerald-500 text-emerald-950 hover:bg-emerald-400 shadow-lg shadow-emerald-500/30 flex items-center gap-2"
-          >
-            <ArrowLeft size={14} />
-            Builder
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setIsMenuOpen((prev) => !prev)}
+              className="w-10 h-10 rounded-lg border border-slate-800 bg-slate-950 hover:bg-slate-900 text-slate-200 flex items-center justify-center shadow-sm transition-colors"
+              aria-label="Open menu"
+            >
+              <Menu size={18} />
+            </button>
+            {isMenuOpen && (
+              <div className="absolute right-0 mt-2 w-52 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 overflow-hidden">
+                {user ? (
+                  <div className="px-4 py-3 border-b border-slate-800">
+                    <div className="text-[10px] uppercase tracking-widest text-slate-500">Signed in</div>
+                    <div className="text-xs text-slate-200 truncate">{user.displayName || user.email || 'Google user'}</div>
+                  </div>
+                ) : (
+                  <div className="px-4 py-3 border-b border-slate-800 text-xs text-slate-400">Not signed in</div>
+                )}
+                <button
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    signInWithGoogle().catch((error) => console.error('Failed to sign in', error));
+                  }}
+                  className="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-200 hover:bg-slate-800"
+                >
+                  Sign in with Google
+                </button>
+                {user && (
+                  <button
+                    onClick={() => {
+                      setIsMenuOpen(false);
+                      signOutUser().catch((error) => console.error('Failed to sign out', error));
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-xs font-medium text-red-300 hover:bg-slate-800"
+                  >
+                    Sign out
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </header>
 

@@ -13,7 +13,10 @@ import {
   Disc,
   Gauge,
   Activity,
-  Wind
+  Wind,
+  Play as PlayIcon,
+  Pause as PauseIcon,
+  Square
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -30,16 +33,24 @@ interface SidebarProps {
   onUpdateRole?: (id: string, role: 'handler' | 'cutter') => void;
   onUpdateCutterDefense?: (id: string, cutterDefense: 'under' | 'deep') => void;
   isPlaying: boolean;
+  animationState: 'IDLE' | 'PLAYING' | 'PAUSED';
+  animationTime: number;
+  onStartAnimation: () => void;
+  onTogglePause: () => void;
+  onStopAnimation: () => void;
+  hasPlayers: boolean;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
   description, onUpdateDescription,
   players, selectedPlayerId, onDeletePlayer, onClearPath,
   onUndoPathPoint, onAssignDisc, onUpdateSpeed, onUpdateAcceleration,
-  onUpdateRole, onUpdateCutterDefense, isPlaying
+  onUpdateRole, onUpdateCutterDefense, isPlaying,
+  animationState, animationTime, onStartAnimation, onTogglePause, onStopAnimation, hasPlayers
 }) => {
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const selectedPlayer = players.find(p => p.id === selectedPlayerId);
+  const isAnimationActive = animationState !== 'IDLE';
   const coveredOffense = selectedPlayer?.coversOffenseId
     ? players.find(p => p.id === selectedPlayer.coversOffenseId)
     : undefined;
@@ -117,6 +128,26 @@ const Sidebar: React.FC<SidebarProps> = ({
   return (
     <div className="w-80 bg-slate-900 border-l border-slate-800 flex flex-col shrink-0 h-full overflow-hidden">
       <div className="flex-1 p-5 overflow-y-auto custom-scrollbar">
+        <div className="mb-4 rounded-xl border border-slate-800 bg-slate-900/70 p-3 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-[8px] font-bold text-slate-500 uppercase leading-none mb-1 tracking-widest">Play Clock</span>
+              <div className={`text-xl font-mono font-bold leading-none tabular-nums ${animationState === 'PLAYING' ? 'text-emerald-400' : 'text-slate-400'}`}>
+                {animationTime.toFixed(1)}<span className="text-[10px] ml-0.5 opacity-50 font-sans">s</span>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              {!isAnimationActive ? (
+                <button onClick={onStartAnimation} disabled={!hasPlayers} className="px-4 py-1.5 rounded-md text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-emerald-900/20 transition-all"><PlayIcon size={14} fill="white" /> Run</button>
+              ) : (
+                <>
+                  <button onClick={onTogglePause} className="w-8 h-8 rounded-md bg-amber-600 hover:bg-amber-500 flex items-center justify-center shadow-lg shadow-amber-900/20 transition-all">{animationState === 'PLAYING' ? <PauseIcon size={16} fill="white" /> : <PlayIcon size={16} fill="white" />}</button>
+                  <button onClick={onStopAnimation} className="w-8 h-8 rounded-md bg-red-600 hover:bg-red-500 flex items-center justify-center shadow-lg shadow-red-900/20 transition-all"><Square size={16} fill="white" /></button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
             <BookOpen size={14} /> Tactical Notes

@@ -7,6 +7,8 @@ import HeaderBar from './components/HeaderBar';
 import WorkflowSidebar from './components/WorkflowSidebar';
 import { Player, InteractionMode, Play, Team, Point, Force, Formation } from './types';
 import { loadPlaysFromStorage, savePlaysToStorage, loadFormationsFromStorage, saveFormationsToStorage, normalizeFormationPlayers, normalizePlay, loadPendingSelection, clearPendingSelection } from './services/storage';
+import { ensureAnonymousAuth } from './services/auth';
+import { isFirestoreEnabled, fetchPlays, fetchFormations, savePlayToFirestore, saveFormationToFirestore } from './services/firestore';
 import { DEFAULT_SPEED, DEFAULT_ACCELERATION, MAX_PLAYERS_PER_TEAM, FIELD_WIDTH, buildPresetFormation, getDumpOffsetX } from './services/formations';
 
 const generateId = () => {
@@ -44,6 +46,7 @@ const App: React.FC = () => {
   const [showSaveFormationModal, setShowSaveFormationModal] = useState(false);
   const [tempFormationName, setTempFormationName] = useState('');
   const [formationNameError, setFormationNameError] = useState<string | null>(null);
+  const [playbookLoaded, setPlaybookLoaded] = useState(false);
 
   const isAnimationActive = animationState !== 'IDLE';
 
@@ -59,6 +62,43 @@ const App: React.FC = () => {
   useEffect(() => {
     saveFormationsToStorage(savedFormations);
   }, [savedFormations]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadRemote = async () => {
+      if (!isFirestoreEnabled()) {
+        setPlaybookLoaded(true);
+        return;
+      }
+      try {
+        await ensureAnonymousAuth();
+        if (cancelled) return;
+        const [remotePlays, remoteFormations] = await Promise.all([fetchPlays(), fetchFormations()]);
+        if (cancelled) return;
+        if (remotePlays.length > 0 || remoteFormations.length > 0) {
+          setSavedPlays(remotePlays);
+          setSavedFormations(remoteFormations);
+        } else {
+          const localPlays = loadPlaysFromStorage();
+          const localFormations = loadFormationsFromStorage();
+          if (localPlays.length > 0 || localFormations.length > 0) {
+            await Promise.all([
+              ...localPlays.map((play) => savePlayToFirestore(play)),
+              ...localFormations.map((formation) => saveFormationToFirestore(formation))
+            ]);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load playbook from Firestore', error);
+      } finally {
+        if (!cancelled) setPlaybookLoaded(true);
+      }
+    };
+    loadRemote();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const pending = loadPendingSelection();
@@ -85,8 +125,10 @@ const App: React.FC = () => {
         return;
       }
     }
-    clearPendingSelection();
-  }, [savedPlays, savedFormations]);
+    if (playbookLoaded) {
+      clearPendingSelection();
+    }
+  }, [savedPlays, savedFormations, playbookLoaded]);
 
   const maxPlayDuration = useMemo(() => {
     let maxDur = 0;
@@ -401,6 +443,11 @@ const App: React.FC = () => {
     });
     setEditingPlayId(newPlay.id);
     setPlayName(finalName);
+    if (isFirestoreEnabled()) {
+      ensureAnonymousAuth()
+        .then(() => savePlayToFirestore(newPlay))
+        .catch((error) => console.error('Failed to save play to Firestore', error));
+    }
     setTimeout(() => {
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
@@ -408,11 +455,14 @@ const App: React.FC = () => {
   };
 
   const loadPlay = (play: Play) => {
+    stopAnimation();
     setPlayers(play.players);
     setPlayName(play.name);
     setForce(play.force);
     setPlayDescription(play.description || '');
     setEditingPlayId(play.id);
+    setSelectedPlayerId(null);
+    setMode(InteractionMode.SELECT);
   };
 
   const saveFormation = () => {
@@ -428,14 +478,22 @@ const App: React.FC = () => {
       players: buildFormationPlayers()
     };
     setSavedFormations(prev => [newFormation, ...prev]);
+    if (isFirestoreEnabled()) {
+      ensureAnonymousAuth()
+        .then(() => saveFormationToFirestore(newFormation))
+        .catch((error) => console.error('Failed to save formation to Firestore', error));
+    }
     setTempFormationName('');
     setFormationNameError(null);
     setShowSaveFormationModal(false);
   };
 
   const loadFormation = (formation: Formation) => {
+    stopAnimation();
     setPlayers(formation.players);
     setActiveFormation('custom');
+    setSelectedPlayerId(null);
+    setMode(InteractionMode.SELECT);
   };
 
   // storage + formation helpers are imported
@@ -618,18 +676,10 @@ const App: React.FC = () => {
       )}
 
       <HeaderBar
-        playName={playName}
-        onPlayNameChange={setPlayName}
         onOpenPlaybook={() => {
           window.history.pushState({}, '', '/playbook');
           window.dispatchEvent(new PopStateEvent('popstate'));
         }}
-        animationState={animationState}
-        animationTime={animationTime}
-        onStartAnimation={startAnimation}
-        onTogglePause={togglePause}
-        onStopAnimation={stopAnimation}
-        hasPlayers={players.length > 0}
       />
 
 
@@ -642,6 +692,8 @@ const App: React.FC = () => {
           activeFormation={activeFormation}
           setActiveFormation={setActiveFormation}
           setMode={setMode}
+          playName={playName}
+          onPlayNameChange={setPlayName}
           force={force}
           onForceChange={setForce}
           savedFormations={savedFormations}
@@ -699,6 +751,12 @@ const App: React.FC = () => {
           onUpdateRole={updatePlayerRole}
           onUpdateCutterDefense={updateCutterDefense}
           isPlaying={isAnimationActive} 
+          animationState={animationState}
+          animationTime={animationTime}
+          onStartAnimation={startAnimation}
+          onTogglePause={togglePause}
+          onStopAnimation={stopAnimation}
+          hasPlayers={players.length > 0}
           description={playDescription}
           onUpdateDescription={setPlayDescription}
         />

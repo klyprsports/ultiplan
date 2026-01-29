@@ -4,6 +4,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import LandingPage from './LandingPage';
 import PlaybookPage from './PlaybookPage';
+import './services/firebase';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
