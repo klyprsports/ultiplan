@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import LandingPage from './LandingPage';
+import PlaybookPage from './PlaybookPage';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -10,25 +11,42 @@ if (!rootElement) {
 }
 
 const Router: React.FC = () => {
-  const [isAppRoute, setIsAppRoute] = useState(() =>
-    window.location.pathname.startsWith('/app') || window.location.hash.startsWith('#/app')
-  );
+  const getRoute = () => {
+    const hash = window.location.hash;
+    if (hash.startsWith('#/app')) {
+      window.history.replaceState({}, '', '/builder');
+      return 'app';
+    }
+    if (hash.startsWith('#/builder')) {
+      window.history.replaceState({}, '', '/builder');
+      return 'app';
+    }
+    if (hash.startsWith('#/playbook')) {
+      window.history.replaceState({}, '', '/playbook');
+      return 'playbook';
+    }
+    const path = window.location.pathname;
+    if (path.startsWith('/builder')) return 'app';
+    if (path.startsWith('/playbook')) return 'playbook';
+    if (path.startsWith('/library')) return 'playbook';
+    return 'landing';
+  };
+
+  const [route, setRoute] = useState(() => getRoute());
 
   useEffect(() => {
     const updateRoute = () => {
-      setIsAppRoute(
-        window.location.pathname.startsWith('/app') || window.location.hash.startsWith('#/app')
-      );
+      setRoute(getRoute());
     };
-    window.addEventListener('hashchange', updateRoute);
     window.addEventListener('popstate', updateRoute);
     return () => {
-      window.removeEventListener('hashchange', updateRoute);
       window.removeEventListener('popstate', updateRoute);
     };
   }, []);
 
-  return isAppRoute ? <App /> : <LandingPage />;
+  if (route === 'app') return <App />;
+  if (route === 'playbook') return <PlaybookPage />;
+  return <LandingPage />;
 };
 
 const root = ReactDOM.createRoot(rootElement);

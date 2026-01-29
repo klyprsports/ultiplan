@@ -27,7 +27,7 @@ const LandingPage: React.FC = () => {
               <div className="flex items-center gap-3">
                 <span className="text-[10px] uppercase tracking-[0.35em] text-emerald-300/80">Free Forever</span>
                 <a
-                  href="#/app"
+                  href="/playbook"
                   className="px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest bg-emerald-500 text-emerald-950 shadow-lg shadow-emerald-500/30 hover:bg-emerald-400 transition-colors"
                 >
                   Open App
@@ -40,7 +40,7 @@ const LandingPage: React.FC = () => {
             <section className="pt-16 pb-12 grid lg:grid-cols-[1.1fr_0.9fr] gap-12 items-center">
               <div>
                 <div className="inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-[10px] uppercase tracking-[0.35em] text-emerald-200">
-                  Built for ultimate captains
+                  Built for the Ultimate nerd
                 </div>
                 <h1
                   className="mt-6 text-4xl sm:text-5xl lg:text-6xl font-bold leading-tight text-slate-50"
@@ -53,7 +53,7 @@ const LandingPage: React.FC = () => {
                 </p>
                 <div className="mt-8 flex flex-wrap items-center gap-4">
                   <a
-                    href="#/app"
+                    href="/playbook"
                     className="px-6 py-3 rounded-2xl text-xs sm:text-sm font-bold uppercase tracking-[0.3em] bg-emerald-500 text-emerald-950 shadow-xl shadow-emerald-500/30 hover:bg-emerald-400 transition-colors"
                   >
                     Start Building

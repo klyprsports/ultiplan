@@ -1,12 +1,12 @@
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Trash2, Plus, X, Save, Library } from 'lucide-react';
+import { Plus, X, Save } from 'lucide-react';
 import Field from './components/Field';
 import Sidebar from './components/Sidebar';
 import HeaderBar from './components/HeaderBar';
 import WorkflowSidebar from './components/WorkflowSidebar';
 import { Player, InteractionMode, Play, Team, Point, Force, Formation } from './types';
-import { loadPlaysFromStorage, savePlaysToStorage, loadFormationsFromStorage, saveFormationsToStorage, normalizeFormationPlayers, normalizePlay } from './services/storage';
+import { loadPlaysFromStorage, savePlaysToStorage, loadFormationsFromStorage, saveFormationsToStorage, normalizeFormationPlayers, normalizePlay, loadPendingSelection, clearPendingSelection } from './services/storage';
 import { DEFAULT_SPEED, DEFAULT_ACCELERATION, MAX_PLAYERS_PER_TEAM, FIELD_WIDTH, buildPresetFormation, getDumpOffsetX } from './services/formations';
 
 const generateId = () => {
@@ -38,14 +38,12 @@ const App: React.FC = () => {
   const lastTickRef = useRef<number>(0);
   const [showNewPlayModal, setShowNewPlayModal] = useState(false);
   const [showSavePlayModal, setShowSavePlayModal] = useState(false);
-  const [showLibraryModal, setShowLibraryModal] = useState(false);
   const [tempPlayName, setTempPlayName] = useState('');
   const [tempSavePlayName, setTempSavePlayName] = useState('');
   const [activeFormation, setActiveFormation] = useState<'vertical' | 'side' | 'ho' | 'custom' | null>(null);
   const [showSaveFormationModal, setShowSaveFormationModal] = useState(false);
   const [tempFormationName, setTempFormationName] = useState('');
   const [formationNameError, setFormationNameError] = useState<string | null>(null);
-  const [libraryTab, setLibraryTab] = useState<'plays' | 'formations'>('plays');
 
   const isAnimationActive = animationState !== 'IDLE';
 
@@ -61,6 +59,34 @@ const App: React.FC = () => {
   useEffect(() => {
     saveFormationsToStorage(savedFormations);
   }, [savedFormations]);
+
+  useEffect(() => {
+    const pending = loadPendingSelection();
+    if (!pending) return;
+    if (pending.type === 'new-play') {
+      setTempPlayName('');
+      setShowNewPlayModal(true);
+      clearPendingSelection();
+      return;
+    }
+    if (pending.type === 'play') {
+      const play = savedPlays.find(p => p.id === pending.id);
+      if (play) {
+        loadPlay(play);
+        clearPendingSelection();
+        return;
+      }
+    }
+    if (pending.type === 'formation') {
+      const formation = savedFormations.find(f => f.id === pending.id);
+      if (formation) {
+        loadFormation(formation);
+        clearPendingSelection();
+        return;
+      }
+    }
+    clearPendingSelection();
+  }, [savedPlays, savedFormations]);
 
   const maxPlayDuration = useMemo(() => {
     let maxDur = 0;
@@ -387,12 +413,6 @@ const App: React.FC = () => {
     setForce(play.force);
     setPlayDescription(play.description || '');
     setEditingPlayId(play.id);
-    setShowLibraryModal(false);
-  };
-
-  const deleteSavedPlay = (id: string) => {
-    setSavedPlays(prev => prev.filter(p => p.id !== id));
-    if (editingPlayId === id) setEditingPlayId(null);
   };
 
   const saveFormation = () => {
@@ -416,11 +436,6 @@ const App: React.FC = () => {
   const loadFormation = (formation: Formation) => {
     setPlayers(formation.players);
     setActiveFormation('custom');
-    setShowLibraryModal(false);
-  };
-
-  const deleteSavedFormation = (id: string) => {
-    setSavedFormations(prev => prev.filter(f => f.id !== id));
   };
 
   // storage + formation helpers are imported
@@ -602,67 +617,13 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Library Modal */}
-      {showLibraryModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[80vh]">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/50">
-              <div className="flex items-center gap-3">
-                <h2 className="text-lg font-bold flex items-center gap-2"><Library size={20} className="text-indigo-400" /> Library</h2>
-                <div className="flex items-center gap-2 bg-slate-800/60 border border-slate-700 rounded-lg p-1 text-[10px] font-bold">
-                  <button onClick={() => setLibraryTab('plays')} className={`px-2 py-1 rounded ${libraryTab === 'plays' ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>Plays</button>
-                  <button onClick={() => setLibraryTab('formations')} className={`px-2 py-1 rounded ${libraryTab === 'formations' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'}`}>Formations</button>
-                </div>
-              </div>
-              <button onClick={() => setShowLibraryModal(false)} className="text-slate-500 hover:text-white transition-colors"><X size={20} /></button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-6 grid grid-cols-2 gap-4 custom-scrollbar">
-              {libraryTab === 'plays' && (
-                savedPlays.length === 0 ? (
-                  <div className="col-span-2 py-20 text-center text-slate-500 italic">No plays saved yet.</div>
-                ) : (
-                  savedPlays.map(p => (
-                    <div key={p.id} className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 flex flex-col gap-3 group hover:border-indigo-500/50 transition-all shadow-sm">
-                      <div className="flex justify-between items-start">
-                        <div className="flex flex-col">
-                          <h3 className="font-bold text-slate-100">{p.name}</h3>
-                          <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">{p.players.length} Players • {p.force} Force</span>
-                        </div>
-                        <button onClick={(e) => { e.stopPropagation(); deleteSavedPlay(p.id); }} className="p-1.5 text-slate-500 hover:text-red-400 transition-colors"><Trash2 size={16} /></button>
-                      </div>
-                      <button onClick={() => loadPlay(p)} className="w-full py-2 bg-slate-700 hover:bg-indigo-600 text-white text-xs font-bold rounded-lg transition-all">Load Play</button>
-                    </div>
-                  ))
-                )
-              )}
-              {libraryTab === 'formations' && (
-                savedFormations.length === 0 ? (
-                  <div className="col-span-2 py-20 text-center text-slate-500 italic">No formations saved yet.</div>
-                ) : (
-                  savedFormations.map(f => (
-                    <div key={f.id} className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 flex flex-col gap-3 group hover:border-emerald-500/50 transition-all shadow-sm">
-                      <div className="flex justify-between items-start">
-                        <div className="flex flex-col">
-                          <h3 className="font-bold text-slate-100">{f.name}</h3>
-                          <span className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">{f.players.filter(p => p.team === 'offense').length} O • {f.players.filter(p => p.team === 'defense').length} D</span>
-                        </div>
-                        <button onClick={(e) => { e.stopPropagation(); deleteSavedFormation(f.id); }} className="p-1.5 text-slate-500 hover:text-red-400 transition-colors"><Trash2 size={16} /></button>
-                      </div>
-                      <button onClick={() => loadFormation(f)} className="w-full py-2 bg-slate-700 hover:bg-emerald-600 text-white text-xs font-bold rounded-lg transition-all">Load Formation</button>
-                    </div>
-                  ))
-                )
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      
       <HeaderBar
         playName={playName}
         onPlayNameChange={setPlayName}
-        onOpenLibrary={() => setShowLibraryModal(true)}
+        onOpenPlaybook={() => {
+          window.history.pushState({}, '', '/playbook');
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        }}
         animationState={animationState}
         animationTime={animationTime}
         onStartAnimation={startAnimation}

@@ -1,10 +1,11 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Play as PlayIcon,
   Pause as PauseIcon,
   Square,
   Library,
-  Edit3
+  Edit3,
+  Menu
 } from 'lucide-react';
 
 type AnimationState = 'IDLE' | 'PLAYING' | 'PAUSED';
@@ -12,7 +13,7 @@ type AnimationState = 'IDLE' | 'PLAYING' | 'PAUSED';
 interface HeaderBarProps {
   playName: string;
   onPlayNameChange: (name: string) => void;
-  onOpenLibrary: () => void;
+  onOpenPlaybook: () => void;
   animationState: AnimationState;
   animationTime: number;
   onStartAnimation: () => void;
@@ -24,7 +25,7 @@ interface HeaderBarProps {
 const HeaderBar: React.FC<HeaderBarProps> = ({
   playName,
   onPlayNameChange,
-  onOpenLibrary,
+  onOpenPlaybook,
   animationState,
   animationTime,
   onStartAnimation,
@@ -34,6 +35,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
 }) => {
   const playNameInputRef = useRef<HTMLInputElement>(null);
   const isAnimationActive = animationState !== 'IDLE';
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
     <header className="flex items-center justify-between px-6 py-3 bg-slate-900 border-b border-slate-800 shrink-0 shadow-lg z-10">
@@ -60,10 +62,6 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-1.5 ml-3 border-l border-slate-800 pl-3">
-          <button onClick={onOpenLibrary} className="flex items-center gap-2 px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md border border-slate-700 transition-colors disabled:opacity-50">
-            <Library size={16} />
-            <span className="text-[10px] font-bold tracking-widest uppercase text-slate-300">Library</span>
-          </button>
           <div className="flex items-center gap-3 pl-2 border-l border-slate-800">
             <div className="flex flex-col items-end">
               <span className="text-[8px] font-bold text-slate-500 uppercase leading-none mb-1 tracking-widest">Play Clock</span>
@@ -84,7 +82,31 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
           </div>
         </div>
       </div>
-      <div className="flex items-center gap-3" />
+      <div className="flex items-center gap-3">
+        <div className="relative">
+          <button
+            onClick={() => setIsMenuOpen((prev) => !prev)}
+            className="w-10 h-10 rounded-lg border border-slate-800 bg-slate-950 hover:bg-slate-900 text-slate-200 flex items-center justify-center shadow-sm transition-colors"
+            aria-label="Open menu"
+          >
+            <Menu size={18} />
+          </button>
+          {isMenuOpen && (
+            <div className="absolute right-0 mt-2 w-40 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50">
+              <button
+                onClick={() => {
+                  setIsMenuOpen(false);
+                  onOpenPlaybook();
+                }}
+                className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-200 hover:bg-slate-800"
+              >
+                <Library size={14} />
+                Playbook
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
     </header>
   );
 };

@@ -2,6 +2,7 @@ import { Play, Formation, Player, Force } from '../types';
 
 export const PLAY_STORAGE_KEY = 'ultiplan_saved_plays_v1';
 export const FORMATION_STORAGE_KEY = 'ultiplan_saved_formations_v1';
+export const PENDING_SELECTION_KEY = 'ultiplan_pending_selection_v1';
 
 export const loadPlaysFromStorage = (): Play[] => {
   const saved = localStorage.getItem(PLAY_STORAGE_KEY);
@@ -31,6 +32,30 @@ export const loadFormationsFromStorage = (): Formation[] => {
 
 export const saveFormationsToStorage = (formations: Formation[]) => {
   localStorage.setItem(FORMATION_STORAGE_KEY, JSON.stringify(formations));
+};
+
+export type PendingSelection =
+  | { type: 'play'; id: string }
+  | { type: 'formation'; id: string }
+  | { type: 'new-play' };
+
+export const loadPendingSelection = (): PendingSelection | null => {
+  const saved = localStorage.getItem(PENDING_SELECTION_KEY);
+  if (!saved) return null;
+  try {
+    return JSON.parse(saved) as PendingSelection;
+  } catch (e) {
+    console.error('Failed to load pending selection', e);
+    return null;
+  }
+};
+
+export const setPendingSelection = (selection: PendingSelection) => {
+  localStorage.setItem(PENDING_SELECTION_KEY, JSON.stringify(selection));
+};
+
+export const clearPendingSelection = () => {
+  localStorage.removeItem(PENDING_SELECTION_KEY);
 };
 
 export const normalizeFormationPlayers = (formationPlayers: Player[]) => {

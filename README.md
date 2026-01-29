@@ -12,7 +12,7 @@ Ultiplan is a lightweight, browser-based playbook for designing and animating ul
 - Per-player speed and acceleration controls to model timing.
 - Auto-D to generate defender matchups from offense positions.
 - Tactical notes with a simple markdown-lite formatter.
-- Play library with save/load/delete (stored in browser localStorage).
+- Playbook with save/load/delete (stored in browser localStorage).
 
 ## Tech Stack
 - React + TypeScript + Vite
