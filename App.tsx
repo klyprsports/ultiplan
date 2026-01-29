@@ -30,6 +30,7 @@ const App: React.FC = () => {
   const [savedFormations, setSavedFormations] = useState<Formation[]>([]);
   const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [draggingToken, setDraggingToken] = useState<{ team: 'offense' | 'defense'; labelNum: number } | null>(null);
   
   const [animationState, setAnimationState] = useState<AnimationState>('IDLE');
   const [animationTime, setAnimationTime] = useState(0);
@@ -102,6 +103,61 @@ const App: React.FC = () => {
     };
     setPlayers(prev => [...prev, newPlayer]);
     setSelectedPlayerId(id);
+  };
+
+  const addOffensePlayerWithLabel = (labelNum: number, x: number, y: number) => {
+    let added = false;
+    const id = generateId();
+    const newPlayer: Player = {
+      id,
+      team: 'offense',
+      x,
+      y,
+      label: `O${labelNum}`,
+      path: [],
+      speed: DEFAULT_SPEED,
+      acceleration: DEFAULT_ACCELERATION,
+      hasDisc: false,
+      role: 'cutter'
+    };
+    setPlayers(prev => {
+      const offense = prev.filter(p => p.team === 'offense');
+      if (offense.length >= MAX_PLAYERS_PER_TEAM) return prev;
+      if (prev.some(p => p.team === 'offense' && p.label === `O${labelNum}`)) return prev;
+      added = true;
+      return [...prev, newPlayer];
+    });
+    if (added) {
+      setSelectedPlayerId(id);
+    }
+    return added;
+  };
+
+  const addDefensePlayerWithLabel = (labelNum: number, x: number, y: number) => {
+    let added = false;
+    const id = generateId();
+    const newPlayer: Player = {
+      id,
+      team: 'defense',
+      x,
+      y,
+      label: `D${labelNum}`,
+      path: [],
+      speed: DEFAULT_SPEED,
+      acceleration: DEFAULT_ACCELERATION,
+      hasDisc: false
+    };
+    setPlayers(prev => {
+      const defense = prev.filter(p => p.team === 'defense');
+      if (defense.length >= MAX_PLAYERS_PER_TEAM) return prev;
+      if (prev.some(p => p.team === 'defense' && p.label === `D${labelNum}`)) return prev;
+      added = true;
+      return [...prev, newPlayer];
+    });
+    if (added) {
+      setSelectedPlayerId(id);
+    }
+    return added;
   };
 
   const updatePlayerPosition = (id: string, x: number, y: number) => {
@@ -271,11 +327,13 @@ const App: React.FC = () => {
 
   const handleFieldClick = (x: number, y: number) => {
     if (isAnimationActive) return;
-    if (mode === InteractionMode.ADD_OFFENSE) addPlayer('offense', x, y);
-    else if (mode === InteractionMode.ADD_DEFENSE) addPlayer('defense', x, y);
-    else if ((mode === InteractionMode.DRAW || mode === InteractionMode.SELECT) && selectedPlayerId) {
-      const selected = players.find(p => p.id === selectedPlayerId);
-      if (selected?.team === 'offense') addPathPoint(selectedPlayerId, { x, y });
+    const selected = selectedPlayerId ? players.find(p => p.id === selectedPlayerId) : null;
+    if (
+      selected?.team === 'offense' &&
+      (mode === InteractionMode.DRAW || mode === InteractionMode.SELECT || mode === InteractionMode.ADD_OFFENSE)
+    ) {
+      addPathPoint(selectedPlayerId, { x, y });
+      return;
     }
     else if (mode === InteractionMode.SELECT) setSelectedPlayerId(null);
   };
@@ -605,13 +663,6 @@ const App: React.FC = () => {
         playName={playName}
         onPlayNameChange={setPlayName}
         onOpenLibrary={() => setShowLibraryModal(true)}
-        onSaveFormation={() => { setTempFormationName(''); setFormationNameError(null); setShowSaveFormationModal(true); }}
-        canSaveFormation={hasUnsavedFormation}
-        formationSaveReason={formationSaveReason}
-        onSavePlay={savePlay}
-        canSavePlay={players.some(p => p.team === 'offense')}
-        playSaveReason={playSaveReason}
-        saveStatus={saveStatus}
         animationState={animationState}
         animationTime={animationTime}
         onStartAnimation={startAnimation}
@@ -638,12 +689,41 @@ const App: React.FC = () => {
           onCreateCustomFormation={() => { setActiveFormation('custom'); setMode(InteractionMode.ADD_OFFENSE); }}
           onOpenSaveFormationModal={() => { setTempFormationName(''); setFormationNameError(null); setShowSaveFormationModal(true); }}
           hasUnsavedFormation={hasUnsavedFormation}
+          onSaveFormation={() => { setTempFormationName(''); setFormationNameError(null); setShowSaveFormationModal(true); }}
+          canSaveFormation={hasUnsavedFormation}
+          formationSaveReason={formationSaveReason}
           onAutoAssignDefense={autoAssignDefense}
+          onSavePlay={savePlay}
+          canSavePlay={players.some(p => p.team === 'offense')}
+          playSaveReason={playSaveReason}
+          saveStatus={saveStatus}
           maxPlayersPerTeam={MAX_PLAYERS_PER_TEAM}
+          usedOffenseLabels={players.filter(p => p.team === 'offense').map(p => parseInt(p.label.replace('O', ''), 10)).filter(n => !Number.isNaN(n))}
+          usedDefenseLabels={players.filter(p => p.team === 'defense').map(p => parseInt(p.label.replace('D', ''), 10)).filter(n => !Number.isNaN(n))}
+          draggingToken={draggingToken}
+          onTokenDragStart={(team, labelNum) => setDraggingToken({ team, labelNum })}
+          onTokenDragEnd={() => setDraggingToken(null)}
         />
 
         <div className="flex-1 bg-slate-950 flex flex-col items-center justify-center overflow-auto p-8 relative">
-          <Field players={players} mode={mode} selectedPlayerId={selectedPlayerId} onFieldClick={handleFieldClick} onUpdatePlayer={updatePlayerPosition} onAddPathPoint={addPathPoint} onSelectPlayer={setSelectedPlayerId} animationTime={isAnimationActive ? animationTime : null} force={force} />
+          <Field
+            players={players}
+            mode={mode}
+            selectedPlayerId={selectedPlayerId}
+            onFieldClick={handleFieldClick}
+            onUpdatePlayer={updatePlayerPosition}
+            onAddPathPoint={addPathPoint}
+            onSelectPlayer={setSelectedPlayerId}
+            animationTime={isAnimationActive ? animationTime : null}
+            force={force}
+            onDropOffense={addOffensePlayerWithLabel}
+            onDropDefense={addDefensePlayerWithLabel}
+            onDropResult={(success) => {
+              if (success) setDraggingToken(null);
+            }}
+            draggingToken={draggingToken}
+            onDebugEvent={() => {}}
+          />
         </div>
 
         <Sidebar 

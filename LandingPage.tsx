@@ -16,8 +16,8 @@ const LandingPage: React.FC = () => {
           <header className="mx-auto max-w-6xl px-6 pt-8">
             <div className="flex items-center justify-between rounded-2xl border border-slate-800/60 bg-slate-950/70 px-4 py-3 shadow-xl shadow-slate-950/40 backdrop-blur">
               <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-emerald-500/20 ring-1 ring-emerald-400/30 flex items-center justify-center">
-                  <span className="text-emerald-300 text-lg font-bold" style={{ fontFamily: '"Space Grotesk", "Trebuchet MS", sans-serif' }}>U</span>
+                <div className="h-12 w-12 rounded-lg bg-slate-950 ring-1 ring-emerald-400/30 flex items-center justify-center overflow-hidden">
+                  <img src="/icons/ultiplay-icon.png" alt="Ultiplan icon" className="h-full w-full object-contain" />
                 </div>
                 <div>
                   <div className="text-sm uppercase tracking-[0.3em] text-slate-400">Ultiplan</div>
@@ -116,40 +116,6 @@ const LandingPage: React.FC = () => {
               </div>
             </section>
 
-            <section className="py-12">
-              <div className="rounded-[28px] border border-slate-800/70 bg-slate-900/60 p-6 md:p-8 shadow-2xl">
-                <div className="grid lg:grid-cols-[0.9fr_1.1fr] gap-8 items-center">
-                  <div>
-                    <div className="text-xs uppercase tracking-[0.35em] text-emerald-300">Screenshots</div>
-                    <h3 className="mt-3 text-2xl sm:text-3xl font-bold" style={{ fontFamily: '"Space Grotesk", "Trebuchet MS", sans-serif' }}>
-                      Show the flow before you step on the line.
-                    </h3>
-                    <p className="mt-4 text-sm text-slate-400">
-                      Capture the full set, then share the visual with your line. Swap in more screenshots anytime.
-                    </p>
-                    <a
-                      href="#/app"
-                      className="mt-6 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.3em] text-emerald-300 hover:text-emerald-200"
-                    >
-                      Open the builder →
-                    </a>
-                  </div>
-                  <div className="grid gap-4">
-                    <div className="rounded-2xl border border-slate-800 overflow-hidden">
-                      <img src="/screenshots/breakside-attack.png" alt="Ultiplan screenshot detail" className="w-full" />
-                    </div>
-                    <div className="grid sm:grid-cols-2 gap-4">
-                      <div className="rounded-2xl border border-slate-800/70 bg-slate-950/80 h-36 flex items-center justify-center text-xs uppercase tracking-[0.35em] text-slate-600">
-                        Drop another screenshot
-                      </div>
-                      <div className="rounded-2xl border border-slate-800/70 bg-slate-950/80 h-36 flex items-center justify-center text-xs uppercase tracking-[0.35em] text-slate-600">
-                        Or a drill card
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </section>
           </main>
         </div>
       </div>

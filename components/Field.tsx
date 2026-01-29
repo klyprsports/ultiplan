@@ -12,6 +12,10 @@ interface FieldProps {
   onSelectPlayer: (id: string) => void;
   animationTime: number | null;
   force: Force;
+  onDropOffense: (labelNum: number, x: number, y: number) => boolean;
+  onDropDefense: (labelNum: number, x: number, y: number) => boolean;
+  onDropResult: (success: boolean) => void;
+  draggingToken: { team: 'offense' | 'defense'; labelNum: number } | null;
 }
 
 const FIELD_WIDTH = 40; // yards
@@ -20,9 +24,20 @@ const ENDZONE_DEPTH = 20; // yards
 const SCALE = 8; // pixels per yard
 const REACTION_DELAY = 0.25; // seconds
 
-const Field: React.FC<FieldProps> = ({ 
-  players, mode, selectedPlayerId, onFieldClick, onUpdatePlayer, 
-  onAddPathPoint, onSelectPlayer, animationTime, force
+const Field: React.FC<FieldProps> = ({
+  players,
+  mode,
+  selectedPlayerId,
+  onFieldClick,
+  onUpdatePlayer,
+  onAddPathPoint,
+  onSelectPlayer,
+  animationTime,
+  force,
+  onDropOffense,
+  onDropDefense,
+  onDropResult,
+  draggingToken
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -54,6 +69,19 @@ const Field: React.FC<FieldProps> = ({
     return { x: (clientX - CTM.e) / (CTM.a * SCALE), y: (clientY - CTM.f) / (CTM.d * SCALE) };
   };
 
+  const getCoordinatesFromClient = (clientX: number, clientY: number): Point | null => {
+    if (!svgRef.current) return null;
+    const CTM = svgRef.current.getScreenCTM();
+    if (CTM) {
+      return { x: (clientX - CTM.e) / (CTM.a * SCALE), y: (clientY - CTM.f) / (CTM.d * SCALE) };
+    }
+    const rect = svgRef.current.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    const x = ((clientX - rect.left) / rect.width) * FIELD_WIDTH;
+    const y = ((clientY - rect.top) / rect.height) * FIELD_HEIGHT;
+    return { x, y };
+  };
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (animationTime !== null) return;
     const coords = getCoordinates(e);
@@ -62,14 +90,27 @@ const Field: React.FC<FieldProps> = ({
     const playerId = target.closest('[data-player-id]')?.getAttribute('data-player-id');
     if (playerId) {
       onSelectPlayer(playerId);
-      if (mode === InteractionMode.SELECT) { setIsDragging(true); setActivePlayerId(playerId); }
-    } else { onFieldClick(coords.x, coords.y); }
+      if (mode === InteractionMode.SELECT || mode === InteractionMode.ADD_OFFENSE || mode === InteractionMode.ADD_DEFENSE || mode === InteractionMode.DRAW) {
+        setIsDragging(true);
+        setActivePlayerId(playerId);
+      }
+    } else {
+      onFieldClick(coords.x, coords.y);
+    }
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (animationTime !== null || !isDragging || !activePlayerId) return;
     const coords = getCoordinates(e);
-    if (coords && mode === InteractionMode.SELECT) onUpdatePlayer(activePlayerId, coords.x, coords.y);
+    if (
+      coords &&
+      (mode === InteractionMode.SELECT ||
+        mode === InteractionMode.ADD_OFFENSE ||
+        mode === InteractionMode.ADD_DEFENSE ||
+        mode === InteractionMode.DRAW)
+    ) {
+      onUpdatePlayer(activePlayerId, coords.x, coords.y);
+    }
   };
 
   const handleMouseUp = () => { setIsDragging(false); setActivePlayerId(null); };
@@ -153,19 +194,130 @@ const Field: React.FC<FieldProps> = ({
   };
 
   const w = FIELD_WIDTH * SCALE, h = FIELD_HEIGHT * SCALE, ez = ENDZONE_DEPTH * SCALE;
+  const handleDrop = (clientX: number, clientY: number, payload: string) => {
+    if (!draggingToken) return;
+    const expectedPayload = `${draggingToken.team}:${draggingToken.labelNum}`;
+    if (payload !== expectedPayload) return;
+    const [team, labelRaw] = payload.split(':');
+    if (!team || !labelRaw) return;
+    const labelNum = parseInt(labelRaw, 10);
+    if (Number.isNaN(labelNum)) return;
+    const coords = getCoordinatesFromClient(clientX, clientY);
+    if (!coords) return;
+    const clampedX = Math.max(0, Math.min(FIELD_WIDTH, coords.x));
+    const clampedY = Math.max(0, Math.min(FIELD_HEIGHT, coords.y));
+    let success = false;
+    if (team === 'offense') success = onDropOffense(labelNum, clampedX, clampedY);
+    else if (team === 'defense') success = onDropDefense(labelNum, clampedX, clampedY);
+    onDropResult(success);
+  };
 
   return (
-    <div className={`flex items-center gap-6 select-none ${animationTime !== null ? 'pointer-events-none' : ''}`}>
+    <div
+      className={`flex items-center gap-6 select-none ${animationTime !== null ? 'pointer-events-none' : ''}`}
+      onDragOver={(e) => {
+        if (animationTime !== null) return;
+        const types = Array.from(e.dataTransfer.types || []);
+        if (!types.includes('application/x-ultiplan-player')) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }}
+      onDrop={(e) => {
+        if (animationTime !== null) return;
+        const types = Array.from(e.dataTransfer.types || []);
+        if (!types.includes('application/x-ultiplan-player')) return;
+        if (!draggingToken) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const payload = e.dataTransfer.getData('application/x-ultiplan-player')
+          || e.dataTransfer.getData('text/plain')
+          || e.dataTransfer.getData('text');
+        if (!payload) return;
+        handleDrop(e.clientX, e.clientY, payload);
+      }}
+    >
       <div className="flex-shrink-0">
         <div className="px-0.5 py-10 rounded-full border border-slate-700/50 text-slate-500 text-[10px] font-bold tracking-[0.5em] uppercase" style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}>HOME SIDELINE</div>
       </div>
       <div className="flex flex-col items-center">
         <div className="relative shadow-2xl ring-1 ring-slate-800 rounded-sm">
-          <svg ref={svgRef} width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="bg-emerald-900 overflow-visible cursor-crosshair touch-none" onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
+          <svg
+            ref={svgRef}
+            width={w}
+            height={h}
+            viewBox={`0 0 ${w} ${h}`}
+            className="bg-emerald-900 overflow-visible cursor-crosshair touch-none"
+            draggable={false}
+            onDragStart={(e) => e.preventDefault()}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onDragOver={(e) => {
+              if (animationTime !== null) return;
+              const types = Array.from(e.dataTransfer.types || []);
+              if (!types.includes('application/x-ultiplan-player')) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'copy';
+            }}
+            onDrop={(e) => {
+              if (animationTime !== null) return;
+              const types = Array.from(e.dataTransfer.types || []);
+              if (!types.includes('application/x-ultiplan-player')) return;
+              if (!draggingToken) return;
+              e.preventDefault();
+              e.stopPropagation();
+              const payload = e.dataTransfer.getData('application/x-ultiplan-player')
+                || e.dataTransfer.getData('text/plain')
+                || e.dataTransfer.getData('text');
+              if (!payload) return;
+              handleDrop(e.clientX, e.clientY, payload);
+            }}
+            onDragStart={(e) => {
+              if (draggingToken) {
+                e.preventDefault();
+              }
+            }}
+          >
             <rect width={w} height={h} fill="#065f46" />
             <rect x="0" y="0" width={w} height={h} fill="none" stroke="white" strokeWidth="2" />
             <line x1="0" y1={ez} x2={w} y2={ez} stroke="white" strokeWidth="2" />
             <line x1="0" y1={h - ez} x2={w} y2={h - ez} stroke="white" strokeWidth="2" />
+            {Array.from({ length: FIELD_HEIGHT + 1 }, (_, i) => i)
+              .filter((yard) => yard > ENDZONE_DEPTH && yard < FIELD_HEIGHT - ENDZONE_DEPTH)
+              .map((yard) => (
+              <g key={`tick-${yard}`}>
+                <line
+                  x1="0"
+                  y1={yard * SCALE}
+                  x2={0.6 * SCALE}
+                  y2={yard * SCALE}
+                  stroke="rgba(255,255,255,0.35)"
+                  strokeWidth="1"
+                />
+                <line
+                  x1={w - 0.6 * SCALE}
+                  y1={yard * SCALE}
+                  x2={w}
+                  y2={yard * SCALE}
+                  stroke="rgba(255,255,255,0.35)"
+                  strokeWidth="1"
+                />
+              </g>
+            ))}
+            {Array.from({ length: Math.floor(FIELD_HEIGHT / 10) + 1 }, (_, i) => i * 10)
+              .filter((yard) => yard > ENDZONE_DEPTH && yard < FIELD_HEIGHT - ENDZONE_DEPTH)
+              .map((yard) => (
+              <line
+                key={`yard-${yard}`}
+                x1="0"
+                y1={yard * SCALE}
+                x2={w}
+                y2={yard * SCALE}
+                stroke="rgba(255,255,255,0.18)"
+                strokeWidth="1"
+              />
+            ))}
             {players.map(player => {
               const pts = [{ x: player.x, y: player.y }, ...player.path];
               return pts.length > 1 && (
@@ -177,7 +329,7 @@ const Field: React.FC<FieldProps> = ({
             {players.map(player => {
               const pos = getAnimatedPosition(player);
               return (
-                <g key={player.id} data-player-id={player.id} transform={`translate(${pos.x * SCALE}, ${pos.y * SCALE})`} className="cursor-pointer group">
+                <g key={player.id} data-player-id={player.id} transform={`translate(${pos.x * SCALE}, ${pos.y * SCALE})`} className="cursor-pointer group" draggable={false}>
                   <circle cx="0" cy="0" r={1.2 * SCALE} fill={player.team === 'offense' ? '#2563eb' : '#dc2626'} stroke={selectedPlayerId === player.id && !animationTime ? 'white' : 'rgba(255,255,255,0.2)'} strokeWidth={selectedPlayerId === player.id && !animationTime ? "3" : "1"} />
                   {player.hasDisc && <g transform={`translate(${1.2 * SCALE}, ${-1.2 * SCALE})`}><circle r={0.6 * SCALE} fill="#f8fafc" stroke="#94a3b8" strokeWidth="1" /></g>}
                   <text x="0" y="1" textAnchor="middle" fill="white" fontSize={0.8 * SCALE} fontWeight="bold" pointerEvents="none" className="font-mono">{player.label}</text>

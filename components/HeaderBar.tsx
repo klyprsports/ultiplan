@@ -1,29 +1,18 @@
 import React, { useRef } from 'react';
-import { 
+import {
   Play as PlayIcon,
   Pause as PauseIcon,
   Square,
   Library,
-  Save,
-  Loader2,
-  CheckCircle2,
   Edit3
 } from 'lucide-react';
 
-type SaveStatus = 'idle' | 'saving' | 'saved';
 type AnimationState = 'IDLE' | 'PLAYING' | 'PAUSED';
 
 interface HeaderBarProps {
   playName: string;
   onPlayNameChange: (name: string) => void;
   onOpenLibrary: () => void;
-  onSaveFormation: () => void;
-  canSaveFormation: boolean;
-  formationSaveReason: string;
-  onSavePlay: (name?: string) => void;
-  canSavePlay: boolean;
-  playSaveReason: string;
-  saveStatus: SaveStatus;
   animationState: AnimationState;
   animationTime: number;
   onStartAnimation: () => void;
@@ -36,13 +25,6 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
   playName,
   onPlayNameChange,
   onOpenLibrary,
-  onSaveFormation,
-  canSaveFormation,
-  formationSaveReason,
-  onSavePlay,
-  canSavePlay,
-  playSaveReason,
-  saveStatus,
   animationState,
   animationTime,
   onStartAnimation,
@@ -56,7 +38,9 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
   return (
     <header className="flex items-center justify-between px-6 py-3 bg-slate-900 border-b border-slate-800 shrink-0 shadow-lg z-10">
       <div className="flex items-center gap-3">
-        <div className="w-9 h-9 bg-indigo-600 rounded-lg flex items-center justify-center shadow-indigo-500/20 shadow-lg"><PlayIcon className="fill-white text-white" size={18} /></div>
+        <div className="h-10 w-10 bg-slate-950 rounded-lg flex items-center justify-center shadow-indigo-500/10 shadow-sm overflow-hidden">
+          <img src="/icons/ultiplay-icon.png" alt="Ultiplan icon" className="h-full w-full object-contain" />
+        </div>
         <div className="flex flex-col">
           <div className="flex items-center gap-1 group">
             <input 
@@ -79,24 +63,6 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
           <button onClick={onOpenLibrary} className="flex items-center gap-2 px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md border border-slate-700 transition-colors disabled:opacity-50">
             <Library size={16} />
             <span className="text-[10px] font-bold tracking-widest uppercase text-slate-300">Library</span>
-          </button>
-          <button
-            onClick={onSaveFormation}
-            disabled={!canSaveFormation}
-            title={formationSaveReason || 'Save current formation'}
-            className="flex items-center gap-2 px-2 py-1.5 rounded-md border transition-colors text-[10px] font-bold tracking-widest uppercase bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700 disabled:opacity-50"
-          >
-            <Save size={16} />
-            Save Formation
-          </button>
-          <button
-            onClick={() => onSavePlay()}
-            disabled={!canSavePlay || saveStatus === 'saving'}
-            title={playSaveReason || 'Save current play'}
-            className="flex items-center gap-2 px-2 py-1.5 rounded-md border transition-colors text-[10px] font-bold tracking-widest uppercase bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700 disabled:opacity-50"
-          >
-            {saveStatus === 'saving' ? <Loader2 size={14} className="animate-spin" /> : saveStatus === 'saved' ? <CheckCircle2 size={14} /> : <Save size={14} />}
-            {saveStatus === 'saved' ? 'Saved' : 'Save Play'}
           </button>
           <div className="flex items-center gap-3 pl-2 border-l border-slate-800">
             <div className="flex flex-col items-end">
