@@ -25,16 +25,38 @@ export interface Player {
 
 export interface Play {
   id: string;
+  ownerId?: string;
   name: string;
   players: Player[];
   force: Force;
   description: string;
+  visibility?: 'private' | 'team' | 'public';
+  sharedTeamIds?: string[];
+  createdAt?: unknown;
+  updatedAt?: unknown;
+  createdBy?: string;
+  lastEditedBy?: string;
+  sourcePlayId?: string;
 }
 
 export interface Formation {
   id: string;
+  ownerId?: string;
   name: string;
   players: Player[];
+  visibility?: 'private' | 'team' | 'public';
+  sharedTeamIds?: string[];
+  createdAt?: unknown;
+  updatedAt?: unknown;
+  createdBy?: string;
+  lastEditedBy?: string;
+  sourceFormationId?: string;
+}
+
+export interface TeamInfo {
+  id: string;
+  name: string;
+  ownerId: string;
 }
 
 export enum InteractionMode {

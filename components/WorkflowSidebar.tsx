@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ShieldAlert } from 'lucide-react';
-import { InteractionMode, Player, Formation, Force } from '../types';
+import { InteractionMode, Player, Formation, Force, TeamInfo } from '../types';
 
 interface WorkflowSidebarProps {
   players: Player[];
@@ -11,6 +11,11 @@ interface WorkflowSidebarProps {
   setMode: (mode: InteractionMode) => void;
   playName: string;
   onPlayNameChange: (name: string) => void;
+  teams: TeamInfo[];
+  shareVisibility: 'private' | 'team' | 'public';
+  onShareVisibilityChange: (value: 'private' | 'team' | 'public') => void;
+  sharedTeamIds: string[];
+  onSharedTeamIdsChange: (ids: string[]) => void;
   force: Force;
   onForceChange: (force: Force) => void;
   savedFormations: Formation[];
@@ -44,6 +49,11 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
   setMode,
   playName,
   onPlayNameChange,
+  teams,
+  shareVisibility,
+  onShareVisibilityChange,
+  sharedTeamIds,
+  onSharedTeamIdsChange,
   force,
   onForceChange,
   savedFormations,
@@ -81,6 +91,44 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
           className="mt-2 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100 font-semibold tracking-tight focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
           placeholder="Enter Play Name"
         />
+      </div>
+
+      <div>
+        <div className="text-[10px] text-slate-500 uppercase tracking-widest">Sharing</div>
+        <select
+          value={shareVisibility}
+          onChange={(e) => onShareVisibilityChange(e.target.value as 'private' | 'team' | 'public')}
+          className="mt-2 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100 font-semibold tracking-tight focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+        >
+          <option value="private">Private</option>
+          <option value="team">Team</option>
+          <option value="public">Public</option>
+        </select>
+        {shareVisibility === 'team' && (
+          <div className="mt-2 space-y-2">
+            {teams.length === 0 ? (
+              <div className="text-[10px] text-slate-500">Join or create a team in Playbook to share.</div>
+            ) : (
+              teams.map((team) => (
+                <label key={team.id} className="flex items-center gap-2 text-xs text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={sharedTeamIds.includes(team.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        onSharedTeamIdsChange([...sharedTeamIds, team.id]);
+                      } else {
+                        onSharedTeamIdsChange(sharedTeamIds.filter((id) => id !== team.id));
+                      }
+                    }}
+                    className="accent-emerald-400"
+                  />
+                  <span>{team.name}</span>
+                </label>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       <div>
