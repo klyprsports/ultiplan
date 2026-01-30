@@ -5,6 +5,8 @@ import App from './App';
 import LandingPage from './LandingPage';
 import PlaybookPage from './PlaybookPage';
 import './services/firebase';
+import { getCurrentUser, subscribeToAuth } from './services/auth';
+import { ensureUserDocument, isFirestoreEnabled } from './services/firestore';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -34,6 +36,7 @@ const Router: React.FC = () => {
   };
 
   const [route, setRoute] = useState(() => getRoute());
+  const [user, setUser] = useState(() => getCurrentUser());
 
   useEffect(() => {
     const updateRoute = () => {
@@ -45,9 +48,34 @@ const Router: React.FC = () => {
     };
   }, []);
 
+  useEffect(() => subscribeToAuth(setUser), []);
+
+  useEffect(() => {
+    if (!user || user.isAnonymous) return;
+    if (!isFirestoreEnabled()) return;
+    let cancelled = false;
+    const ensureUser = async () => {
+      try {
+        await ensureUserDocument();
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to ensure user document', error);
+        }
+      }
+    };
+    ensureUser();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid]);
+
+  const path = window.location.pathname || '/';
+  if ((route === 'app' || route === 'playbook') && (!user || user.isAnonymous)) {
+    return <LandingPage user={user} redirectPath={path} />;
+  }
   if (route === 'app') return <App />;
   if (route === 'playbook') return <PlaybookPage />;
-  return <LandingPage />;
+  return <LandingPage user={user} />;
 };
 
 const root = ReactDOM.createRoot(rootElement);

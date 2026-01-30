@@ -1,6 +1,26 @@
 import React from 'react';
+import type { User } from 'firebase/auth';
+import { signInWithGoogle, signOutUser } from './services/auth';
 
-const LandingPage: React.FC = () => {
+type LandingPageProps = {
+  user: User | null;
+  redirectPath?: string;
+};
+
+const LandingPage: React.FC<LandingPageProps> = ({ user, redirectPath }) => {
+  const isSignedIn = Boolean(user && !user.isAnonymous);
+
+  const handleSignIn = async () => {
+    await signInWithGoogle();
+    const destination = redirectPath || '/playbook';
+    window.location.assign(destination);
+  };
+
+  const handleOpenApp = () => {
+    const destination = redirectPath || '/playbook';
+    window.location.assign(destination);
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 overflow-hidden">
       <div className="relative">
@@ -25,13 +45,24 @@ const LandingPage: React.FC = () => {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-[10px] uppercase tracking-[0.35em] text-emerald-300/80">Free Forever</span>
-                <a
-                  href="/playbook"
-                  className="px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest bg-emerald-500 text-emerald-950 shadow-lg shadow-emerald-500/30 hover:bg-emerald-400 transition-colors"
-                >
-                  Open App
-                </a>
+                <span className="text-[10px] uppercase tracking-[0.35em] text-emerald-300/80">Sign in required</span>
+                {isSignedIn ? (
+                  <button
+                    type="button"
+                    onClick={handleOpenApp}
+                    className="px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest bg-emerald-500 text-emerald-950 shadow-lg shadow-emerald-500/30 hover:bg-emerald-400 transition-colors"
+                  >
+                    Open App
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleSignIn}
+                    className="px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest bg-emerald-500 text-emerald-950 shadow-lg shadow-emerald-500/30 hover:bg-emerald-400 transition-colors"
+                  >
+                    Sign in with Google
+                  </button>
+                )}
               </div>
             </div>
           </header>
@@ -52,14 +83,39 @@ const LandingPage: React.FC = () => {
                   Ultiplan is a free, fast playbook for mapping offensive sets, drawing cuts, and visualizing timing in seconds.
                 </p>
                 <div className="mt-8 flex flex-wrap items-center gap-4">
-                  <a
-                    href="/playbook"
-                    className="px-6 py-3 rounded-2xl text-xs sm:text-sm font-bold uppercase tracking-[0.3em] bg-emerald-500 text-emerald-950 shadow-xl shadow-emerald-500/30 hover:bg-emerald-400 transition-colors"
-                  >
-                    Start Building
-                  </a>
-                  <div className="text-xs text-slate-400 uppercase tracking-[0.35em]">No signup • Free forever</div>
+                {isSignedIn ? (
+                  <button
+                      type="button"
+                      onClick={handleOpenApp}
+                      className="px-6 py-3 rounded-2xl text-xs sm:text-sm font-bold uppercase tracking-[0.3em] bg-emerald-500 text-emerald-950 shadow-xl shadow-emerald-500/30 hover:bg-emerald-400 transition-colors"
+                    >
+                      Enter Playbook
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleSignIn}
+                      className="px-6 py-3 rounded-2xl text-xs sm:text-sm font-bold uppercase tracking-[0.3em] bg-emerald-500 text-emerald-950 shadow-xl shadow-emerald-500/30 hover:bg-emerald-400 transition-colors"
+                    >
+                      Sign in to Start
+                    </button>
+                  )}
+                  <div className="text-xs text-slate-400 uppercase tracking-[0.35em]">Free to use • Sign in required</div>
                 </div>
+                {isSignedIn && (
+                  <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-400">
+                    <div className="rounded-xl border border-slate-800/70 bg-slate-950/70 px-3 py-2">
+                      Signed in as <span className="text-slate-200">{user.displayName || user.email || 'Google user'}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={signOutUser}
+                      className="text-[10px] uppercase tracking-[0.35em] text-slate-400 hover:text-emerald-200 transition-colors"
+                    >
+                      Sign out
+                    </button>
+                  </div>
+                )}
                 <div className="mt-10 max-w-md text-xs text-slate-400">
                   <div className="rounded-2xl border border-slate-800/60 bg-slate-950/60 p-4">
                     <div className="text-emerald-300 text-lg font-semibold" style={{ fontFamily: '"Space Grotesk", "Trebuchet MS", sans-serif' }}>Live</div>

@@ -50,6 +50,8 @@ export const signInWithGoogle = async () => {
   await signInWithPopup(auth, provider);
 };
 
+export const getCurrentUser = () => auth?.currentUser ?? null;
+
 export const signOutUser = async () => {
   if (!auth) return;
   localStorage.setItem(DISABLE_ANON_KEY, 'true');

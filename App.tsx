@@ -5,10 +5,10 @@ import Field from './components/Field';
 import Sidebar from './components/Sidebar';
 import HeaderBar from './components/HeaderBar';
 import WorkflowSidebar from './components/WorkflowSidebar';
-import { Player, InteractionMode, Play, Team, Point, Force, Formation } from './types';
-import { loadPlaysFromStorage, savePlaysToStorage, loadFormationsFromStorage, saveFormationsToStorage, normalizeFormationPlayers, normalizePlay, loadPendingSelection, clearPendingSelection } from './services/storage';
-import { ensureAnonymousAuth } from './services/auth';
-import { isFirestoreEnabled, fetchPlays, fetchFormations, savePlayToFirestore, saveFormationToFirestore } from './services/firestore';
+import { Player, InteractionMode, Play, Team, Point, Force, Formation, TeamInfo } from './types';
+import { loadPlaysFromStorage, savePlaysToStorage, loadFormationsFromStorage, saveFormationsToStorage, normalizeFormationPlayers, normalizePlay, loadPendingSelection, clearPendingSelection, setPendingManageTeams } from './services/storage';
+import { signInWithGoogle, getCurrentUser, subscribeToAuth } from './services/auth';
+import { isFirestoreEnabled, ensureUserDocument, fetchFormationsForUser, fetchPlaysForUser, fetchTeamsForUser, savePlayToFirestore, saveFormationToFirestore } from './services/firestore';
 import { DEFAULT_SPEED, DEFAULT_ACCELERATION, MAX_PLAYERS_PER_TEAM, FIELD_WIDTH, buildPresetFormation, getDumpOffsetX } from './services/formations';
 
 const generateId = () => {
@@ -47,13 +47,25 @@ const App: React.FC = () => {
   const [tempFormationName, setTempFormationName] = useState('');
   const [formationNameError, setFormationNameError] = useState<string | null>(null);
   const [playbookLoaded, setPlaybookLoaded] = useState(false);
+  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
+  const [pendingSaveAction, setPendingSaveAction] = useState<null | { type: 'play'; name?: string } | { type: 'formation' }>(null);
+  const [authUser, setAuthUser] = useState<ReturnType<typeof getCurrentUser>>(getCurrentUser());
+  const [teams, setTeams] = useState<TeamInfo[]>([]);
+  const [shareVisibility, setShareVisibility] = useState<'private' | 'team' | 'public'>('private');
+  const [sharedTeamIds, setSharedTeamIds] = useState<string[]>([]);
+  const [playOwnerId, setPlayOwnerId] = useState<string | null>(null);
+  const [playCreatedBy, setPlayCreatedBy] = useState<string | null>(null);
+  const [playSourceId, setPlaySourceId] = useState<string | null>(null);
+  const [formationOwnerId, setFormationOwnerId] = useState<string | null>(null);
+  const [formationCreatedBy, setFormationCreatedBy] = useState<string | null>(null);
+  const [formationSourceId, setFormationSourceId] = useState<string | null>(null);
 
   const isAnimationActive = animationState !== 'IDLE';
 
   useEffect(() => {
     setSavedPlays(loadPlaysFromStorage());
     setSavedFormations(loadFormationsFromStorage());
-  }, []);
+  }, [authUser?.uid]);
 
   useEffect(() => {
     savePlaysToStorage(savedPlays);
@@ -70,10 +82,20 @@ const App: React.FC = () => {
         setPlaybookLoaded(true);
         return;
       }
+      const currentUser = getCurrentUser();
+      if (!currentUser || currentUser.isAnonymous) {
+        setPlaybookLoaded(true);
+        return;
+      }
       try {
-        await ensureAnonymousAuth();
+        const remoteTeams = await fetchTeamsForUser();
         if (cancelled) return;
-        const [remotePlays, remoteFormations] = await Promise.all([fetchPlays(), fetchFormations()]);
+        setTeams(remoteTeams);
+        const teamIds = remoteTeams.map((team) => team.id);
+        const [remotePlays, remoteFormations] = await Promise.all([
+          fetchPlaysForUser(teamIds),
+          fetchFormationsForUser(teamIds)
+        ]);
         if (cancelled) return;
         if (remotePlays.length > 0 || remoteFormations.length > 0) {
           setSavedPlays(remotePlays);
@@ -82,9 +104,10 @@ const App: React.FC = () => {
           const localPlays = loadPlaysFromStorage();
           const localFormations = loadFormationsFromStorage();
           if (localPlays.length > 0 || localFormations.length > 0) {
+            const uid = getCurrentUser()?.uid;
             await Promise.all([
-              ...localPlays.map((play) => savePlayToFirestore(play)),
-              ...localFormations.map((formation) => saveFormationToFirestore(formation))
+              ...localPlays.map((play) => savePlayToFirestore({ ...play, ownerId: play.ownerId || uid, visibility: play.visibility || 'private', sharedTeamIds: play.sharedTeamIds || [] })), 
+              ...localFormations.map((formation) => saveFormationToFirestore({ ...formation, ownerId: formation.ownerId || uid, visibility: formation.visibility || 'private', sharedTeamIds: formation.sharedTeamIds || [] }))
             ]);
           }
         }
@@ -99,6 +122,32 @@ const App: React.FC = () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToAuth(setAuthUser);
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!authUser?.uid) return;
+    if (!isFirestoreEnabled()) return;
+    let cancelled = false;
+    const ensureUser = async () => {
+      try {
+        await ensureUserDocument();
+      } catch (error) {
+        if (!cancelled) {
+          console.error('Failed to ensure user document', error);
+        }
+      }
+    };
+    ensureUser();
+    return () => {
+      cancelled = true;
+    };
+  }, [authUser?.uid]);
 
   useEffect(() => {
     const pending = loadPendingSelection();
@@ -424,13 +473,26 @@ const App: React.FC = () => {
       setShowSavePlayModal(true);
       return;
     }
+    const currentUser = getCurrentUser();
+    if (isFirestoreEnabled() && (!currentUser || currentUser.isAnonymous)) {
+      setPendingSaveAction({ type: 'play', name: finalName });
+      setShowAuthPrompt(true);
+      return;
+    }
+    const visibility = shareVisibility;
     setSaveStatus('saving');
     const newPlay: Play = {
       id: editingPlayId || generateId(),
+      ownerId: playOwnerId || currentUser?.uid,
       name: finalName,
       players,
       force,
-      description: playDescription
+      description: playDescription,
+      visibility,
+      sharedTeamIds: visibility === 'team' ? sharedTeamIds : [],
+      createdBy: playCreatedBy || currentUser?.uid,
+      lastEditedBy: currentUser?.uid,
+      sourcePlayId: playSourceId || undefined
     };
     setSavedPlays(prev => {
       const existing = prev.findIndex(p => p.id === newPlay.id);
@@ -443,10 +505,11 @@ const App: React.FC = () => {
     });
     setEditingPlayId(newPlay.id);
     setPlayName(finalName);
+    setPlayOwnerId(newPlay.ownerId || null);
+    setPlayCreatedBy(newPlay.createdBy || null);
+    setPlaySourceId(newPlay.sourcePlayId || null);
     if (isFirestoreEnabled()) {
-      ensureAnonymousAuth()
-        .then(() => savePlayToFirestore(newPlay))
-        .catch((error) => console.error('Failed to save play to Firestore', error));
+      savePlayToFirestore(newPlay).catch((error) => console.error('Failed to save play to Firestore', error));
     }
     setTimeout(() => {
       setSaveStatus('saved');
@@ -461,6 +524,11 @@ const App: React.FC = () => {
     setForce(play.force);
     setPlayDescription(play.description || '');
     setEditingPlayId(play.id);
+    setPlayOwnerId(play.ownerId || getCurrentUser()?.uid || null);
+    setPlayCreatedBy(play.createdBy || null);
+    setPlaySourceId(play.sourcePlayId || null);
+    setShareVisibility(play.visibility || 'private');
+    setSharedTeamIds(play.sharedTeamIds || []);
     setSelectedPlayerId(null);
     setMode(InteractionMode.SELECT);
   };
@@ -472,16 +540,31 @@ const App: React.FC = () => {
       setFormationNameError('A formation with this name already exists.');
       return;
     }
+    const currentUser = getCurrentUser();
+    if (isFirestoreEnabled() && (!currentUser || currentUser.isAnonymous)) {
+      setPendingSaveAction({ type: 'formation' });
+      setShowSaveFormationModal(false);
+      setShowAuthPrompt(true);
+      return;
+    }
+    const visibility = shareVisibility;
     const newFormation: Formation = {
       id: generateId(),
+      ownerId: formationOwnerId || currentUser?.uid,
       name,
-      players: buildFormationPlayers()
+      players: buildFormationPlayers(),
+      visibility,
+      sharedTeamIds: visibility === 'team' ? sharedTeamIds : [],
+      createdBy: formationCreatedBy || currentUser?.uid,
+      lastEditedBy: currentUser?.uid,
+      sourceFormationId: formationSourceId || undefined
     };
     setSavedFormations(prev => [newFormation, ...prev]);
+    setFormationOwnerId(newFormation.ownerId || null);
+    setFormationCreatedBy(newFormation.createdBy || null);
+    setFormationSourceId(newFormation.sourceFormationId || null);
     if (isFirestoreEnabled()) {
-      ensureAnonymousAuth()
-        .then(() => saveFormationToFirestore(newFormation))
-        .catch((error) => console.error('Failed to save formation to Firestore', error));
+      saveFormationToFirestore(newFormation).catch((error) => console.error('Failed to save formation to Firestore', error));
     }
     setTempFormationName('');
     setFormationNameError(null);
@@ -492,6 +575,11 @@ const App: React.FC = () => {
     stopAnimation();
     setPlayers(formation.players);
     setActiveFormation('custom');
+    setFormationOwnerId(formation.ownerId || getCurrentUser()?.uid || null);
+    setFormationCreatedBy(formation.createdBy || null);
+    setFormationSourceId(formation.sourceFormationId || null);
+    setShareVisibility(formation.visibility || 'private');
+    setSharedTeamIds(formation.sharedTeamIds || []);
     setSelectedPlayerId(null);
     setMode(InteractionMode.SELECT);
   };
@@ -533,9 +621,9 @@ const App: React.FC = () => {
 
   const hasUnsavedPlay = useMemo(() => {
     if (players.length === 0) return false;
-    const current = normalizePlay({ name: playName, force, description: playDescription, players });
+    const current = normalizePlay({ name: playName, force, description: playDescription, players, visibility: shareVisibility, sharedTeamIds });
     return !savedPlays.some(p => {
-      const saved = normalizePlay({ name: p.name, force: p.force, description: p.description || '', players: p.players });
+      const saved = normalizePlay({ name: p.name, force: p.force, description: p.description || '', players: p.players, visibility: p.visibility, sharedTeamIds: p.sharedTeamIds });
       return JSON.stringify(saved) === JSON.stringify(current);
     });
   }, [players, playName, force, playDescription, savedPlays]);
@@ -605,7 +693,20 @@ const App: React.FC = () => {
             </div>
             <div className="p-6 bg-slate-800/30 flex gap-3">
               <button onClick={() => setShowNewPlayModal(false)} className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all">Cancel</button>
-              <button onClick={() => { setPlayers([]); setPlayName(tempPlayName || 'New Play'); setEditingPlayId(null); setPlayDescription(''); setShowNewPlayModal(false); stopAnimation(); }} className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition-all">Create</button>
+              <button onClick={() => {
+                const currentUser = getCurrentUser();
+                setPlayers([]);
+                setPlayName(tempPlayName || 'New Play');
+                setEditingPlayId(null);
+                setPlayDescription('');
+                setPlayOwnerId(currentUser?.uid || null);
+                setPlayCreatedBy(currentUser?.uid || null);
+                setPlaySourceId(null);
+                setShareVisibility('private');
+                setSharedTeamIds([]);
+                setShowNewPlayModal(false);
+                stopAnimation();
+              }} className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition-all">Create</button>
             </div>
           </div>
         </div>
@@ -675,11 +776,63 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {showAuthPrompt && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/50">
+              <h2 className="text-base font-bold">Sign in to save</h2>
+              <button onClick={() => { setShowAuthPrompt(false); setPendingSaveAction(null); }} className="text-slate-500 hover:text-white transition-colors"><X size={20} /></button>
+            </div>
+            <div className="p-6 space-y-3">
+              <p className="text-sm text-slate-300">
+                Sign in with Google to save plays and formations to your playbook.
+              </p>
+              <button
+                onClick={() => {
+                  signInWithGoogle()
+                    .then(() => {
+                      setShowAuthPrompt(false);
+                      const pending = pendingSaveAction;
+                      setPendingSaveAction(null);
+                      if (pending?.type === 'play') {
+                        savePlay(pending.name);
+                      } else if (pending?.type === 'formation') {
+                        saveFormation();
+                      }
+                    })
+                    .catch((error) => console.error('Failed to sign in', error));
+                }}
+                className="w-full px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest bg-slate-100 text-slate-900 hover:bg-white shadow-lg"
+              >
+                Sign in with Google
+              </button>
+              <button
+                onClick={() => { setShowAuthPrompt(false); setPendingSaveAction(null); }}
+                className="w-full px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700"
+              >
+                Not now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <HeaderBar
         onOpenPlaybook={() => {
           window.history.pushState({}, '', '/playbook');
           window.dispatchEvent(new PopStateEvent('popstate'));
         }}
+        onOpenBuilder={() => {
+          window.history.pushState({}, '', '/builder');
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        }}
+        onManageTeams={() => {
+          setPendingManageTeams();
+          window.history.pushState({}, '', '/playbook');
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        }}
+        currentRoute="builder"
+        user={authUser}
       />
 
 
@@ -694,6 +847,16 @@ const App: React.FC = () => {
           setMode={setMode}
           playName={playName}
           onPlayNameChange={setPlayName}
+          teams={teams}
+          shareVisibility={shareVisibility}
+          onShareVisibilityChange={(value) => {
+            setShareVisibility(value);
+            if (value !== 'team') {
+              setSharedTeamIds([]);
+            }
+          }}
+          sharedTeamIds={sharedTeamIds}
+          onSharedTeamIdsChange={setSharedTeamIds}
           force={force}
           onForceChange={setForce}
           savedFormations={savedFormations}
