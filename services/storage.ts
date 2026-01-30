@@ -3,6 +3,7 @@ import { Play, Formation, Player, Force } from '../types';
 export const PLAY_STORAGE_KEY = 'ultiplan_saved_plays_v1';
 export const FORMATION_STORAGE_KEY = 'ultiplan_saved_formations_v1';
 export const PENDING_SELECTION_KEY = 'ultiplan_pending_selection_v1';
+export const PENDING_MANAGE_TEAMS_KEY = 'ultiplan_pending_manage_teams_v1';
 
 export const loadPlaysFromStorage = (): Play[] => {
   const saved = localStorage.getItem(PLAY_STORAGE_KEY);
@@ -58,6 +59,16 @@ export const clearPendingSelection = () => {
   localStorage.removeItem(PENDING_SELECTION_KEY);
 };
 
+export const setPendingManageTeams = () => {
+  localStorage.setItem(PENDING_MANAGE_TEAMS_KEY, 'true');
+};
+
+export const loadPendingManageTeams = () => localStorage.getItem(PENDING_MANAGE_TEAMS_KEY) === 'true';
+
+export const clearPendingManageTeams = () => {
+  localStorage.removeItem(PENDING_MANAGE_TEAMS_KEY);
+};
+
 export const normalizeFormationPlayers = (formationPlayers: Player[]) => {
   return formationPlayers
     .map(p => ({
@@ -96,9 +107,18 @@ export const normalizePlayPlayers = (playPlayers: Player[]) => {
     });
 };
 
-export const normalizePlay = (play: { name: string; force: Force; description: string; players: Player[] }) => ({
+export const normalizePlay = (play: {
+  name: string;
+  force: Force;
+  description: string;
+  players: Player[];
+  visibility?: 'private' | 'team' | 'public';
+  sharedTeamIds?: string[];
+}) => ({
   name: play.name.trim(),
   force: play.force,
   description: play.description.trim(),
-  players: normalizePlayPlayers(play.players)
+  players: normalizePlayPlayers(play.players),
+  visibility: play.visibility ?? 'private',
+  sharedTeamIds: [...(play.sharedTeamIds ?? [])].sort()
 });
