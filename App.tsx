@@ -5,10 +5,11 @@ import Field from './components/Field';
 import Sidebar from './components/Sidebar';
 import HeaderBar from './components/HeaderBar';
 import WorkflowSidebar from './components/WorkflowSidebar';
-import { Player, InteractionMode, Play, Team, Point, Force, Formation, TeamInfo } from './types';
-import { loadPlaysFromStorage, savePlaysToStorage, loadFormationsFromStorage, saveFormationsToStorage, normalizeFormationPlayers, normalizePlay, loadPendingSelection, clearPendingSelection, setPendingManageTeams } from './services/storage';
-import { signInWithGoogle, getCurrentUser, subscribeToAuth } from './services/auth';
-import { isFirestoreEnabled, ensureUserDocument, fetchFormationsForUser, fetchPlaysForUser, fetchTeamsForUser, savePlayToFirestore, saveFormationToFirestore } from './services/firestore';
+import AccountModal from './components/AccountModal';
+import { Player, InteractionMode, Play, Team, Point, Force, Formation } from './types';
+import { loadPlaysFromStorage, savePlaysToStorage, loadFormationsFromStorage, saveFormationsToStorage, normalizeFormationPlayers, normalizePlay, loadPendingSelection, clearPendingSelection, setPendingManageTeams, clearPlaybookStorage } from './services/storage';
+import { signInWithGoogle, getCurrentUser, subscribeToAuth, deleteCurrentUser } from './services/auth';
+import { isFirestoreEnabled, ensureUserDocument, fetchFormationsForUser, fetchPlaysForUser, fetchTeamsForUser, savePlayToFirestore, saveFormationToFirestore, deleteAccountData } from './services/firestore';
 import { DEFAULT_SPEED, DEFAULT_ACCELERATION, MAX_PLAYERS_PER_TEAM, FIELD_WIDTH, buildPresetFormation, getDumpOffsetX } from './services/formations';
 
 const generateId = () => {
@@ -50,9 +51,9 @@ const App: React.FC = () => {
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [pendingSaveAction, setPendingSaveAction] = useState<null | { type: 'play'; name?: string } | { type: 'formation' }>(null);
   const [authUser, setAuthUser] = useState<ReturnType<typeof getCurrentUser>>(getCurrentUser());
-  const [teams, setTeams] = useState<TeamInfo[]>([]);
-  const [shareVisibility, setShareVisibility] = useState<'private' | 'team' | 'public'>('private');
-  const [sharedTeamIds, setSharedTeamIds] = useState<string[]>([]);
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
   const [playOwnerId, setPlayOwnerId] = useState<string | null>(null);
   const [playCreatedBy, setPlayCreatedBy] = useState<string | null>(null);
   const [playSourceId, setPlaySourceId] = useState<string | null>(null);
@@ -61,6 +62,16 @@ const App: React.FC = () => {
   const [formationSourceId, setFormationSourceId] = useState<string | null>(null);
 
   const isAnimationActive = animationState !== 'IDLE';
+
+  const getDeleteAccountErrorMessage = (error: unknown) => {
+    if (error && typeof error === 'object' && 'code' in error) {
+      const code = (error as { code?: string }).code;
+      if (code === 'auth/requires-recent-login') {
+        return 'Please sign in again before deleting your account.';
+      }
+    }
+    return 'Failed to delete account. Please try again.';
+  };
 
   useEffect(() => {
     setSavedPlays(loadPlaysFromStorage());
@@ -90,7 +101,6 @@ const App: React.FC = () => {
       try {
         const remoteTeams = await fetchTeamsForUser();
         if (cancelled) return;
-        setTeams(remoteTeams);
         const teamIds = remoteTeams.map((team) => team.id);
         const [remotePlays, remoteFormations] = await Promise.all([
           fetchPlaysForUser(teamIds),
@@ -129,6 +139,26 @@ const App: React.FC = () => {
       unsubscribe();
     };
   }, []);
+
+  const handleDeleteAccount = async () => {
+    setIsDeletingAccount(true);
+    setDeleteAccountError(null);
+    try {
+      if (isFirestoreEnabled()) {
+        await deleteAccountData();
+      }
+      clearPlaybookStorage();
+      setSavedPlays([]);
+      setSavedFormations([]);
+      await deleteCurrentUser();
+      setShowAccountModal(false);
+    } catch (error) {
+      console.error('Failed to delete account', error);
+      setDeleteAccountError(getDeleteAccountErrorMessage(error));
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
 
   useEffect(() => {
     if (!authUser?.uid) return;
@@ -479,7 +509,9 @@ const App: React.FC = () => {
       setShowAuthPrompt(true);
       return;
     }
-    const visibility = shareVisibility;
+    const existing = savedPlays.find((p) => p.id === editingPlayId);
+    const visibility = existing?.visibility || 'private';
+    const sharedTeamIds = existing?.sharedTeamIds || [];
     setSaveStatus('saving');
     const newPlay: Play = {
       id: editingPlayId || generateId(),
@@ -527,8 +559,6 @@ const App: React.FC = () => {
     setPlayOwnerId(play.ownerId || getCurrentUser()?.uid || null);
     setPlayCreatedBy(play.createdBy || null);
     setPlaySourceId(play.sourcePlayId || null);
-    setShareVisibility(play.visibility || 'private');
-    setSharedTeamIds(play.sharedTeamIds || []);
     setSelectedPlayerId(null);
     setMode(InteractionMode.SELECT);
   };
@@ -547,7 +577,8 @@ const App: React.FC = () => {
       setShowAuthPrompt(true);
       return;
     }
-    const visibility = shareVisibility;
+    const visibility: Formation['visibility'] = 'private';
+    const sharedTeamIds: string[] = [];
     const newFormation: Formation = {
       id: generateId(),
       ownerId: formationOwnerId || currentUser?.uid,
@@ -578,8 +609,6 @@ const App: React.FC = () => {
     setFormationOwnerId(formation.ownerId || getCurrentUser()?.uid || null);
     setFormationCreatedBy(formation.createdBy || null);
     setFormationSourceId(formation.sourceFormationId || null);
-    setShareVisibility(formation.visibility || 'private');
-    setSharedTeamIds(formation.sharedTeamIds || []);
     setSelectedPlayerId(null);
     setMode(InteractionMode.SELECT);
   };
@@ -621,9 +650,9 @@ const App: React.FC = () => {
 
   const hasUnsavedPlay = useMemo(() => {
     if (players.length === 0) return false;
-    const current = normalizePlay({ name: playName, force, description: playDescription, players, visibility: shareVisibility, sharedTeamIds });
+    const current = normalizePlay({ name: playName, force, description: playDescription, players });
     return !savedPlays.some(p => {
-      const saved = normalizePlay({ name: p.name, force: p.force, description: p.description || '', players: p.players, visibility: p.visibility, sharedTeamIds: p.sharedTeamIds });
+      const saved = normalizePlay({ name: p.name, force: p.force, description: p.description || '', players: p.players });
       return JSON.stringify(saved) === JSON.stringify(current);
     });
   }, [players, playName, force, playDescription, savedPlays]);
@@ -702,8 +731,6 @@ const App: React.FC = () => {
                 setPlayOwnerId(currentUser?.uid || null);
                 setPlayCreatedBy(currentUser?.uid || null);
                 setPlaySourceId(null);
-                setShareVisibility('private');
-                setSharedTeamIds([]);
                 setShowNewPlayModal(false);
                 stopAnimation();
               }} className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition-all">Create</button>
@@ -817,6 +844,15 @@ const App: React.FC = () => {
         </div>
       )}
 
+      <AccountModal
+        isOpen={showAccountModal}
+        onClose={() => { if (!isDeletingAccount) setShowAccountModal(false); }}
+        onConfirmDelete={handleDeleteAccount}
+        isDeleting={isDeletingAccount}
+        error={deleteAccountError}
+        userEmail={authUser?.email || null}
+      />
+
       <HeaderBar
         onOpenPlaybook={() => {
           window.history.pushState({}, '', '/playbook');
@@ -831,7 +867,11 @@ const App: React.FC = () => {
           window.history.pushState({}, '', '/playbook');
           window.dispatchEvent(new PopStateEvent('popstate'));
         }}
+        onManageAccount={() => {
+          setShowAccountModal(true);
+        }}
         currentRoute="builder"
+        sublabel="Builder"
         user={authUser}
       />
 
@@ -847,16 +887,6 @@ const App: React.FC = () => {
           setMode={setMode}
           playName={playName}
           onPlayNameChange={setPlayName}
-          teams={teams}
-          shareVisibility={shareVisibility}
-          onShareVisibilityChange={(value) => {
-            setShareVisibility(value);
-            if (value !== 'team') {
-              setSharedTeamIds([]);
-            }
-          }}
-          sharedTeamIds={sharedTeamIds}
-          onSharedTeamIdsChange={setSharedTeamIds}
           force={force}
           onForceChange={setForce}
           savedFormations={savedFormations}

@@ -1,4 +1,4 @@
-import { GoogleAuthProvider, User, linkWithPopup, onAuthStateChanged, signInAnonymously, signInWithPopup, signOut } from 'firebase/auth';
+import { GoogleAuthProvider, User, deleteUser, linkWithPopup, onAuthStateChanged, signInAnonymously, signInWithPopup, signOut } from 'firebase/auth';
 import { auth, isFirebaseConfigured } from './firebase';
 
 let authReadyPromise: Promise<void> | null = null;
@@ -56,4 +56,9 @@ export const signOutUser = async () => {
   if (!auth) return;
   localStorage.setItem(DISABLE_ANON_KEY, 'true');
   await signOut(auth);
+};
+
+export const deleteCurrentUser = async () => {
+  if (!auth?.currentUser) return;
+  await deleteUser(auth.currentUser);
 };

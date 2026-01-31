@@ -3,10 +3,12 @@ import {
   collectionGroup,
   deleteDoc,
   doc,
+  DocumentData,
   getDoc,
   getDocs,
   orderBy,
   query,
+  QueryDocumentSnapshot,
   serverTimestamp,
   setDoc,
   where
@@ -362,4 +364,30 @@ export const deleteFormationFromFirestore = async (id: string) => {
   if (!uid) return;
   const docRef = doc(db, 'formations', id);
   await deleteDoc(docRef);
+};
+
+export const deleteAccountData = async () => {
+  if (!db) return;
+  const uid = getUserId();
+  if (!uid) return;
+
+  const deleteDocs = async (docs: QueryDocumentSnapshot<DocumentData>[]) => {
+    const chunks = chunk(docs, 20);
+    for (const group of chunks) {
+      await Promise.all(group.map((docSnap) => deleteDoc(docSnap.ref)));
+    }
+  };
+
+  const [playsSnap, formationsSnap, legacyPlaysSnap, legacyFormationsSnap] = await Promise.all([
+    getDocs(query(collection(db, 'plays'), where('ownerId', '==', uid))),
+    getDocs(query(collection(db, 'formations'), where('ownerId', '==', uid))),
+    getDocs(collection(db, 'playbook', uid, 'plays')),
+    getDocs(collection(db, 'playbook', uid, 'formations'))
+  ]);
+
+  await deleteDocs(playsSnap.docs);
+  await deleteDocs(formationsSnap.docs);
+  await deleteDocs(legacyPlaysSnap.docs);
+  await deleteDocs(legacyFormationsSnap.docs);
+  await deleteDoc(doc(db, 'users', uid));
 };

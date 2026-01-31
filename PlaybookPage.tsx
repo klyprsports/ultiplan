@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Trash2, BookOpen, LayoutGrid, Menu, Copy, Share2, Users, Plus, Library, LogOut, LogIn } from 'lucide-react';
+import { Trash2, LayoutGrid, Copy, Share2, Users, Plus } from 'lucide-react';
 import { Formation, Play, Player, TeamInfo } from './types';
 import {
   loadFormationsFromStorage,
@@ -8,10 +8,13 @@ import {
   savePlaysToStorage,
   setPendingSelection,
   loadPendingManageTeams,
-  clearPendingManageTeams
+  clearPendingManageTeams,
+  clearPlaybookStorage
 } from './services/storage';
-import { signInWithGoogle, signOutUser, subscribeToAuth, getCurrentUser } from './services/auth';
-import { createTeam, deleteFormationFromFirestore, deletePlayFromFirestore, fetchFormationsForUser, fetchPlaysForUser, fetchTeamsForUser, isFirestoreEnabled, saveFormationToFirestore, savePlayToFirestore } from './services/firestore';
+import { signInWithGoogle, subscribeToAuth, getCurrentUser, deleteCurrentUser } from './services/auth';
+import HeaderBar from './components/HeaderBar';
+import AccountModal from './components/AccountModal';
+import { createTeam, deleteAccountData, deleteFormationFromFirestore, deletePlayFromFirestore, fetchFormationsForUser, fetchPlaysForUser, fetchTeamsForUser, isFirestoreEnabled, saveFormationToFirestore, savePlayToFirestore } from './services/firestore';
 import { User } from 'firebase/auth';
 
 const FIELD_WIDTH = 40;
@@ -30,7 +33,7 @@ const MiniField: React.FC<{ players: Player[]; showPaths?: boolean }> = ({ playe
   );
 
   return (
-    <svg viewBox={viewBox} className="w-full h-40 rounded-lg overflow-hidden bg-slate-950">
+    <svg viewBox={viewBox} preserveAspectRatio="xMidYMid meet" className="w-full h-full rounded-lg overflow-hidden">
       <rect width={FIELD_WIDTH} height={FIELD_HEIGHT} fill="#065f46" />
       <rect x="0" y="0" width={FIELD_WIDTH} height={FIELD_HEIGHT} fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="0.4" />
       <line x1="0" y1={endzoneTop} x2={FIELD_WIDTH} y2={endzoneTop} stroke="rgba(255,255,255,0.5)" strokeWidth="0.4" />
@@ -98,18 +101,30 @@ const PlaybookPage: React.FC = () => {
   const [savedPlays, setSavedPlays] = useState<Play[]>([]);
   const [savedFormations, setSavedFormations] = useState<Formation[]>([]);
   const [user, setUser] = useState<User | null>(null);
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [teams, setTeams] = useState<TeamInfo[]>([]);
   const [showTeamModal, setShowTeamModal] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
   const [sharingTarget, setSharingTarget] = useState<{ type: 'play' | 'formation'; item: Play | Formation } | null>(null);
   const [sharingVisibility, setSharingVisibility] = useState<'private' | 'team' | 'public'>('private');
   const [sharingTeamIds, setSharingTeamIds] = useState<string[]>([]);
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
 
   const navigate = useCallback((path: string) => {
     window.history.pushState({}, '', path);
     window.dispatchEvent(new PopStateEvent('popstate'));
   }, []);
+
+  const getDeleteAccountErrorMessage = (error: unknown) => {
+    if (error && typeof error === 'object' && 'code' in error) {
+      const code = (error as { code?: string }).code;
+      if (code === 'auth/requires-recent-login') {
+        return 'Please sign in again before deleting your account.';
+      }
+    }
+    return 'Failed to delete account. Please try again.';
+  };
 
   useEffect(() => {
     setSavedPlays(loadPlaysFromStorage());
@@ -203,6 +218,26 @@ const PlaybookPage: React.FC = () => {
   const ensureSignedInForWrite = async () => {
     if (user && !user.isAnonymous) return;
     await signInWithGoogle();
+  };
+
+  const handleDeleteAccount = async () => {
+    setIsDeletingAccount(true);
+    setDeleteAccountError(null);
+    try {
+      if (isFirestoreEnabled()) {
+        await deleteAccountData();
+      }
+      clearPlaybookStorage();
+      setSavedPlays([]);
+      setSavedFormations([]);
+      await deleteCurrentUser();
+      setShowAccountModal(false);
+    } catch (error) {
+      console.error('Failed to delete account', error);
+      setDeleteAccountError(getDeleteAccountErrorMessage(error));
+    } finally {
+      setIsDeletingAccount(false);
+    }
   };
 
   const openPlay = (id: string) => {
@@ -326,116 +361,20 @@ const PlaybookPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-slate-950 text-white">
-      <header className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900">
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 bg-slate-950 rounded-lg flex items-center justify-center shadow-indigo-500/10 shadow-sm overflow-hidden">
-            <img src="/icons/ultiplay-icon.png" alt="Ultiplan icon" className="h-full w-full object-contain" />
-          </div>
-          <div>
-            <div className="text-lg font-bold tracking-tight text-white">Ultiplan</div>
-            <div className="text-[10px] text-slate-400 flex items-center gap-2">
-              <BookOpen size={12} className="text-emerald-400" />
-              Playbook
-            </div>
-          </div>
-        </div>
-          <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-xl p-1 text-[11px] font-bold uppercase tracking-widest">
-              <button
-                onClick={() => navigate('/playbook')}
-                className="px-3 py-2 rounded-lg flex items-center gap-2 bg-emerald-500 text-emerald-950"
-                aria-current="page"
-              >
-                <Library size={14} /> Playbook
-              </button>
-              <button
-                onClick={() => navigate('/builder')}
-                className="px-3 py-2 rounded-lg flex items-center gap-2 text-slate-400 hover:text-slate-200"
-              >
-                <LayoutGrid size={14} /> Builder
-              </button>
-            </div>
-            {user && (
-              <div className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2">
-                {user.photoURL ? (
-                  <img src={user.photoURL} alt={user.displayName || user.email || 'User'} className="h-6 w-6 rounded-full object-cover" />
-                ) : (
-                  <div className="h-6 w-6 rounded-full bg-slate-800 text-[10px] font-bold text-slate-200 flex items-center justify-center">
-                    {(user.displayName || user.email || 'U').charAt(0).toUpperCase()}
-                  </div>
-                )}
-                <span className="text-xs text-slate-200 max-w-[140px] truncate">
-                  {user.displayName || user.email || 'Google user'}
-                </span>
-              </div>
-            )}
-            <div className="relative">
-              <button
-              onClick={() => setIsMenuOpen((prev) => !prev)}
-              className="w-10 h-10 rounded-lg border border-slate-800 bg-slate-950 hover:bg-slate-900 text-slate-200 flex items-center justify-center shadow-sm transition-colors"
-              aria-label="Open menu"
-            >
-              <Menu size={18} />
-            </button>
-            {isMenuOpen && (
-              <div className="absolute right-0 mt-2 w-52 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 overflow-hidden">
-                {user ? (
-                  <div className="px-4 py-3 border-b border-slate-800">
-                    <div className="text-[10px] uppercase tracking-widest text-slate-500">Signed in</div>
-                    <div className="text-xs text-slate-200 truncate">{user.displayName || user.email || 'Google user'}</div>
-                  </div>
-                ) : (
-                  <div className="px-4 py-3 border-b border-slate-800 text-xs text-slate-400">Not signed in</div>
-                )}
-                <button
-                  onClick={() => {
-                    setIsMenuOpen(false);
-                    navigate('/builder');
-                  }}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-200 hover:bg-slate-800"
-                >
-                  <LayoutGrid size={14} />
-                  Builder
-                </button>
-                <button
-                  onClick={() => {
-                    setIsMenuOpen(false);
-                    setShowTeamModal(true);
-                  }}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-200 hover:bg-slate-800"
-                >
-                  <Users size={14} />
-                  Manage Teams
-                </button>
-                <div className="border-t border-slate-800/70" />
-                {user ? (
-                  <button
-                    onClick={() => {
-                      setIsMenuOpen(false);
-                      signOutUser().catch((error) => console.error('Failed to sign out', error));
-                    }}
-                    className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-red-300 hover:bg-slate-800"
-                  >
-                    <LogOut size={14} />
-                    Sign out
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => {
-                      setIsMenuOpen(false);
-                      signInWithGoogle().catch((error) => console.error('Failed to sign in', error));
-                    }}
-                    className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-200 hover:bg-slate-800"
-                  >
-                    <LogIn size={14} />
-                    Sign in with Google
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
+      <HeaderBar
+        onOpenPlaybook={() => navigate('/playbook')}
+        onOpenBuilder={() => navigate('/builder')}
+        onManageTeams={() => {
+          setShowTeamModal(true);
+          clearPendingManageTeams();
+        }}
+        onManageAccount={() => {
+          setShowAccountModal(true);
+        }}
+        currentRoute="playbook"
+        sublabel="Playbook"
+        user={user}
+      />
 
       <main className="mx-auto max-w-6xl px-6 py-10">
         <div className="flex items-center justify-between gap-4">
@@ -472,15 +411,14 @@ const PlaybookPage: React.FC = () => {
             {savedPlays.length === 0 ? (
               <div className="py-16 text-center text-slate-500 italic">No plays saved yet.</div>
             ) : (
-              <div className="grid gap-6 md:grid-cols-2">
+              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {savedPlays.map((play) => (
-                  <div key={play.id} className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg">
-                    <MiniField players={play.players} showPaths />
+                  <div key={play.id} className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg max-w-[220px] w-full mx-auto">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <h3 className="text-lg font-bold text-slate-100">{play.name}</h3>
-                        <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mt-1">
-                          {play.players.length} Players · {play.force} Force
+                        <div className="text-[10px] uppercase tracking-[0.24em] text-slate-400 font-bold mt-1 w-full whitespace-nowrap">
+                          {play.players.length} Players - {play.force} Force
                         </div>
                         <div className="mt-2 flex flex-wrap gap-2 text-[9px] uppercase tracking-widest">
                           <span className="px-2 py-1 rounded-full bg-slate-800 text-slate-300">{play.visibility || 'private'}</span>
@@ -510,20 +448,25 @@ const PlaybookPage: React.FC = () => {
                         )}
                       </div>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className={`grid gap-2 ${play.ownerId === user?.uid ? 'grid-cols-1' : 'grid-cols-2'}`}>
                       <button
                         onClick={() => openPlay(play.id)}
                         className="w-full py-2 rounded-xl bg-emerald-500 text-emerald-950 font-bold uppercase tracking-widest text-xs hover:bg-emerald-400 transition-colors"
                       >
                         Open
                       </button>
-                      <button
-                        onClick={() => clonePlay(play)}
-                        className="w-full py-2 rounded-xl bg-slate-800 text-slate-200 font-bold uppercase tracking-widest text-xs hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
-                      >
-                        <Copy size={14} />
-                        Clone
-                      </button>
+                      {play.ownerId !== user?.uid && (
+                        <button
+                          onClick={() => clonePlay(play)}
+                          className="w-full py-2 rounded-xl bg-slate-800 text-slate-200 font-bold uppercase tracking-widest text-xs hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
+                        >
+                          <Copy size={14} />
+                          Clone
+                        </button>
+                      )}
+                    </div>
+                    <div className="mt-2 w-full max-w-[180px] aspect-[4/11] rounded-lg overflow-hidden bg-slate-950/40 border border-slate-800/80 self-center">
+                      <MiniField players={play.players} showPaths />
                     </div>
                   </div>
                 ))}
@@ -537,15 +480,14 @@ const PlaybookPage: React.FC = () => {
             {savedFormations.length === 0 ? (
               <div className="py-16 text-center text-slate-500 italic">No formations saved yet.</div>
             ) : (
-              <div className="grid gap-6 md:grid-cols-2">
+              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {savedFormations.map((formation) => (
-                  <div key={formation.id} className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg">
-                    <MiniField players={formation.players} />
+                  <div key={formation.id} className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg max-w-[220px] w-full mx-auto">
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <h3 className="text-lg font-bold text-slate-100">{formation.name}</h3>
-                        <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mt-1">
-                          {formation.players.filter((p) => p.team === 'offense').length} O · {formation.players.filter((p) => p.team === 'defense').length} D
+                        <div className="text-[10px] uppercase tracking-[0.24em] text-slate-400 font-bold mt-1 w-full whitespace-nowrap">
+                          {formation.players.filter((p) => p.team === 'offense').length} O - {formation.players.filter((p) => p.team === 'defense').length} D
                         </div>
                         <div className="mt-2 flex flex-wrap gap-2 text-[9px] uppercase tracking-widest">
                           <span className="px-2 py-1 rounded-full bg-slate-800 text-slate-300">{formation.visibility || 'private'}</span>
@@ -588,7 +530,10 @@ const PlaybookPage: React.FC = () => {
                       >
                         <Copy size={14} />
                         Clone
-                      </button>
+                        </button>
+                    </div>
+                    <div className="mt-2 w-full max-w-[180px] aspect-[4/11] rounded-lg overflow-hidden bg-slate-950/40 border border-slate-800/80 self-center">
+                      <MiniField players={formation.players} />
                     </div>
                   </div>
                 ))}
@@ -596,6 +541,15 @@ const PlaybookPage: React.FC = () => {
             )}
           </section>
         )}
+
+        <AccountModal
+          isOpen={showAccountModal}
+          onClose={() => { if (!isDeletingAccount) setShowAccountModal(false); }}
+          onConfirmDelete={handleDeleteAccount}
+          isDeleting={isDeletingAccount}
+          error={deleteAccountError}
+          userEmail={user?.email || null}
+        />
 
         {showTeamModal && (
           <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
@@ -645,7 +599,7 @@ const PlaybookPage: React.FC = () => {
           <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
             <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
               <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/50">
-                <h2 className="text-base font-bold flex items-center gap-2"><Share2 size={16} className="text-emerald-400" /> Sharing</h2>
+                <h2 className="text-base font-bold flex items-center gap-2"><Share2 size={16} className="text-emerald-400" /> Share</h2>
                 <button onClick={() => setSharingTarget(null)} className="text-slate-500 hover:text-white transition-colors">X</button>
               </div>
               <div className="p-6 space-y-4">

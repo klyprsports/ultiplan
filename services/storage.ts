@@ -69,6 +69,13 @@ export const clearPendingManageTeams = () => {
   localStorage.removeItem(PENDING_MANAGE_TEAMS_KEY);
 };
 
+export const clearPlaybookStorage = () => {
+  localStorage.removeItem(PLAY_STORAGE_KEY);
+  localStorage.removeItem(FORMATION_STORAGE_KEY);
+  localStorage.removeItem(PENDING_SELECTION_KEY);
+  localStorage.removeItem(PENDING_MANAGE_TEAMS_KEY);
+};
+
 export const normalizeFormationPlayers = (formationPlayers: Player[]) => {
   return formationPlayers
     .map(p => ({

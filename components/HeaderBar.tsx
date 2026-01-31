@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Menu, LayoutGrid, Users, LogOut, LogIn, Library } from 'lucide-react';
+import { Menu, LayoutGrid, Users, LogOut, LogIn, Library, BookOpen, UserRound } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { signInWithGoogle, signOutUser } from '../services/auth';
 
@@ -7,7 +7,9 @@ interface HeaderBarProps {
   onOpenPlaybook: () => void;
   onOpenBuilder: () => void;
   onManageTeams: () => void;
+  onManageAccount?: () => void;
   currentRoute: 'playbook' | 'builder';
+  sublabel?: string;
   user: User | null;
 }
 
@@ -15,7 +17,9 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
   onOpenPlaybook,
   onOpenBuilder,
   onManageTeams,
+  onManageAccount,
   currentRoute,
+  sublabel,
   user
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -27,7 +31,15 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
         <div className="h-10 w-10 bg-slate-950 rounded-lg flex items-center justify-center shadow-indigo-500/10 shadow-sm overflow-hidden">
           <img src="/icons/ultiplay-icon.png" alt="Ultiplan icon" className="h-full w-full object-contain" />
         </div>
-        <div className="text-lg font-bold tracking-tight text-white">Ultiplan</div>
+        <div>
+          <div className="text-lg font-bold tracking-tight text-white">Ultiplan</div>
+          {sublabel && (
+            <div className="text-[10px] text-slate-400 flex items-center gap-2">
+              <BookOpen size={12} className="text-emerald-400" />
+              {sublabel}
+            </div>
+          )}
+        </div>
       </div>
       <div className="flex items-center gap-3">
         <div className="hidden sm:flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-xl p-1 text-[11px] font-bold uppercase tracking-widest">
@@ -70,27 +82,16 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
           </button>
           {isMenuOpen && (
             <div className="absolute right-0 mt-2 w-48 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 overflow-hidden">
-              {currentRoute === 'builder' ? (
+              {isSignedIn && onManageAccount && (
                 <button
                   onClick={() => {
                     setIsMenuOpen(false);
-                    onOpenPlaybook();
+                    onManageAccount();
                   }}
                   className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-200 hover:bg-slate-800"
                 >
-                  <Library size={14} />
-                  Playbook
-                </button>
-              ) : (
-                <button
-                  onClick={() => {
-                    setIsMenuOpen(false);
-                    onOpenBuilder();
-                  }}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-200 hover:bg-slate-800"
-                >
-                  <LayoutGrid size={14} />
-                  Builder
+                  <UserRound size={14} />
+                  Manage Account
                 </button>
               )}
               <button

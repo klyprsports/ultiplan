@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ShieldAlert } from 'lucide-react';
-import { InteractionMode, Player, Formation, Force, TeamInfo } from '../types';
+import { InteractionMode, Player, Formation, Force } from '../types';
 
 interface WorkflowSidebarProps {
   players: Player[];
@@ -11,11 +11,6 @@ interface WorkflowSidebarProps {
   setMode: (mode: InteractionMode) => void;
   playName: string;
   onPlayNameChange: (name: string) => void;
-  teams: TeamInfo[];
-  shareVisibility: 'private' | 'team' | 'public';
-  onShareVisibilityChange: (value: 'private' | 'team' | 'public') => void;
-  sharedTeamIds: string[];
-  onSharedTeamIdsChange: (ids: string[]) => void;
   force: Force;
   onForceChange: (force: Force) => void;
   savedFormations: Formation[];
@@ -49,11 +44,6 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
   setMode,
   playName,
   onPlayNameChange,
-  teams,
-  shareVisibility,
-  onShareVisibilityChange,
-  sharedTeamIds,
-  onSharedTeamIdsChange,
   force,
   onForceChange,
   savedFormations,
@@ -79,66 +69,34 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
 }) => {
   const [showFormationMenu, setShowFormationMenu] = useState(false);
   const offenseCount = players.filter(p => p.team === 'offense').length;
+  const sectionClass = "rounded-2xl border border-slate-800/80 bg-slate-950/60 p-3";
+  const sectionTitle = "text-[11px] font-bold uppercase tracking-[0.26em] text-slate-400";
+  const sectionLabel = "text-[10px] uppercase tracking-[0.24em] text-slate-500";
+  const controlClass = "mt-2 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100 font-semibold tracking-tight focus:outline-none focus:ring-2 focus:ring-emerald-500/30";
+  const buttonClass = "w-full flex items-center justify-between gap-2 bg-slate-900/70 hover:bg-slate-800 disabled:opacity-40 border border-slate-800 px-3 py-2 rounded-lg text-[11px] font-semibold tracking-wide transition-all";
+  const segmentBase = "px-2 py-1.5 rounded-md transition-all text-[11px] font-bold tracking-wide";
 
   return (
-    <div className="w-72 bg-slate-900 border-r border-slate-800 flex flex-col py-6 px-5 gap-6 shrink-0 z-10 shadow-2xl overflow-y-auto custom-scrollbar">
-      <div>
-        <div className="text-[10px] text-slate-500 uppercase tracking-widest">Play Name</div>
+    <div className="w-72 bg-slate-900 border-r border-slate-800 flex flex-col py-4 px-4 gap-4 shrink-0 z-10 shadow-2xl overflow-y-auto custom-scrollbar">
+      <div className={sectionClass}>
+        <div className={sectionTitle}>Play</div>
         <input
           type="text"
           value={playName}
           onChange={(e) => onPlayNameChange(e.target.value)}
-          className="mt-2 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100 font-semibold tracking-tight focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+          className={controlClass}
           placeholder="Enter Play Name"
         />
       </div>
 
-      <div>
-        <div className="text-[10px] text-slate-500 uppercase tracking-widest">Sharing</div>
-        <select
-          value={shareVisibility}
-          onChange={(e) => onShareVisibilityChange(e.target.value as 'private' | 'team' | 'public')}
-          className="mt-2 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-100 font-semibold tracking-tight focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-        >
-          <option value="private">Private</option>
-          <option value="team">Team</option>
-          <option value="public">Public</option>
-        </select>
-        {shareVisibility === 'team' && (
-          <div className="mt-2 space-y-2">
-            {teams.length === 0 ? (
-              <div className="text-[10px] text-slate-500">Join or create a team in Playbook to share.</div>
-            ) : (
-              teams.map((team) => (
-                <label key={team.id} className="flex items-center gap-2 text-xs text-slate-300">
-                  <input
-                    type="checkbox"
-                    checked={sharedTeamIds.includes(team.id)}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        onSharedTeamIdsChange([...sharedTeamIds, team.id]);
-                      } else {
-                        onSharedTeamIdsChange(sharedTeamIds.filter((id) => id !== team.id));
-                      }
-                    }}
-                    className="accent-emerald-400"
-                  />
-                  <span>{team.name}</span>
-                </label>
-              ))
-            )}
-          </div>
-        )}
-      </div>
-
-      <div>
+      <div className={sectionClass}>
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Step 1 · Set Up Offense</h3>
+          <h3 className={sectionTitle}>Step 1 · Offense</h3>
         </div>
         <div className="mt-3 flex flex-col gap-3">
-          <div className="text-[9px] text-slate-500 uppercase tracking-widest">Add Players on O Manually</div>
+          <div className={sectionLabel}>Add Players Manually</div>
           {Array.from({ length: maxPlayersPerTeam }, (_, i) => i + 1).length > 0 && (
-            <div className="flex flex-wrap gap-1">
+            <div className="flex flex-nowrap gap-1 overflow-x-auto pb-1">
               {Array.from({ length: maxPlayersPerTeam }, (_, i) => i + 1).map(labelNum => {
                 const isUsed = usedOffenseLabels.includes(labelNum);
                 const isDragging = draggingToken?.team === 'offense' && draggingToken.labelNum === labelNum;
@@ -164,12 +122,12 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
               })}
             </div>
           )}
-          <div className="text-[9px] text-slate-500 uppercase tracking-widest text-center">Or</div>
+          <div className="text-[9px] text-slate-500 uppercase tracking-[0.3em] text-center">Or</div>
           <div className="relative">
             <button
               onClick={() => setShowFormationMenu(prev => !prev)}
               disabled={isAnimationActive}
-              className="w-full flex items-center justify-between gap-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 border border-slate-700 px-3 py-2 rounded-md text-xs font-medium transition-all shadow-sm"
+              className={buttonClass}
             >
               <span className="flex items-center gap-2">Select from existing formation</span>
             </button>
@@ -228,31 +186,27 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
         </div>
       </div>
 
-      <div className="w-full h-px bg-slate-800" />
-
-      <div>
+      <div className={sectionClass}>
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Step 2 · Choose Force</h3>
+          <h3 className={sectionTitle}>Step 2 · Force</h3>
         </div>
-        <div className="mt-3 bg-slate-800 px-3 py-2 rounded-lg border border-slate-700 text-[10px] font-bold shadow-inner">
-          <div className="text-slate-500 uppercase tracking-widest mb-2">Force</div>
-          <div className="grid grid-cols-2 gap-2">
-            <button onClick={() => onForceChange('home')} className={`px-2 py-1 rounded transition-all ${force === 'home' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200 bg-slate-900/40'}`}>HOME</button>
-            <button onClick={() => onForceChange('away')} className={`px-2 py-1 rounded transition-all ${force === 'away' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200 bg-slate-900/40'}`}>AWAY</button>
+        <div className="mt-3">
+          <div className={sectionLabel}>Force Direction</div>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <button onClick={() => onForceChange('home')} className={`${segmentBase} ${force === 'home' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200 bg-slate-900/40'}`}>HOME</button>
+            <button onClick={() => onForceChange('away')} className={`${segmentBase} ${force === 'away' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200 bg-slate-900/40'}`}>AWAY</button>
           </div>
         </div>
       </div>
 
-      <div className="w-full h-px bg-slate-800" />
-
-      <div>
+      <div className={sectionClass}>
         <div className="flex items-center justify-between">
-          <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Step 3 · Set up Defense</h3>
+          <h3 className={sectionTitle}>Step 3 · Defense</h3>
         </div>
-        <div className="mt-2 text-[9px] text-slate-500 uppercase tracking-widest">Add players on D Manually</div>
-        <div className="mt-2 flex flex-col gap-3">
+        <div className="mt-3 flex flex-col gap-3">
+          <div className={sectionLabel}>Add Players Manually</div>
           {Array.from({ length: maxPlayersPerTeam }, (_, i) => i + 1).length > 0 && (
-            <div className="flex flex-wrap gap-1">
+            <div className="flex flex-nowrap gap-1 overflow-x-auto pb-1">
               {Array.from({ length: maxPlayersPerTeam }, (_, i) => i + 1).map(labelNum => {
                 const isUsed = usedDefenseLabels.includes(labelNum);
                 const isDragging = draggingToken?.team === 'defense' && draggingToken.labelNum === labelNum;
@@ -278,29 +232,29 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
               })}
             </div>
           )}
-          <div className="text-[9px] text-slate-500 uppercase tracking-widest text-center">Or</div>
-          <button onClick={onAutoAssignDefense} disabled={isAnimationActive || offenseCount === 0} className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-30 border border-slate-700 px-3 py-2 rounded-md text-xs font-bold transition-all shadow-sm">
+          <div className="text-[9px] text-slate-500 uppercase tracking-[0.3em] text-center">Or</div>
+          <button onClick={onAutoAssignDefense} disabled={isAnimationActive || offenseCount === 0} className={buttonClass}>
             <ShieldAlert size={14} className="text-red-400" /> Auto-Assign Defense
           </button>
         </div>
       </div>
 
-      <div className="w-full h-px bg-slate-800" />
-
-      <div className="flex items-center justify-between">
-        <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">Step 4 · Draw Routes</h3>
+      <div className={sectionClass}>
+        <div className="flex items-center justify-between">
+          <h3 className={sectionTitle}>Step 4 · Draw Routes</h3>
+        </div>
+        <p className="mt-2 text-[10px] text-slate-500 leading-relaxed">
+          Select any player and click on the field to define routes.
+        </p>
       </div>
-      <p className="mt-2 text-[10px] text-slate-500 leading-relaxed">
-        Once players are on the field, select any player and click on the field to define routes.
-      </p>
 
-      <div className="mt-auto pt-6 border-t border-slate-800">
-        <div className="flex flex-col gap-2">
+      <div className="mt-auto">
+        <div className={`${sectionClass} flex flex-col gap-2`}>
           <button
             onClick={onSaveFormation}
             disabled={!canSaveFormation}
             title={formationSaveReason || 'Save current formation'}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md border transition-colors text-[10px] font-bold tracking-widest uppercase bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700 disabled:opacity-50"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors text-[10px] font-bold tracking-widest uppercase bg-slate-900/70 hover:bg-slate-800 text-slate-300 border-slate-800 disabled:opacity-50"
           >
             Save Formation
           </button>
@@ -308,7 +262,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
             onClick={() => onSavePlay()}
             disabled={!canSavePlay || saveStatus === 'saving'}
             title={playSaveReason || 'Save current play'}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md border transition-colors text-[10px] font-bold tracking-widest uppercase bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700 disabled:opacity-50"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors text-[10px] font-bold tracking-widest uppercase bg-emerald-500/90 hover:bg-emerald-400 text-emerald-950 border-emerald-500/60 disabled:opacity-50"
           >
             {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved' : 'Save Play'}
           </button>
