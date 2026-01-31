@@ -9,11 +9,16 @@ import {
   setPendingSelection,
   loadPendingManageTeams,
   clearPendingManageTeams,
-  clearPlaybookStorage
+  clearPlaybookStorage,
+  hasSeenOnboarding,
+  setSeenOnboarding,
+  setPendingTour
 } from './services/storage';
 import { signInWithGoogle, subscribeToAuth, getCurrentUser, deleteCurrentUser } from './services/auth';
 import HeaderBar from './components/HeaderBar';
 import AccountModal from './components/AccountModal';
+import OnboardingIntroModal from './components/OnboardingIntroModal';
+import ShareModal from './components/ShareModal';
 import { createTeam, deleteAccountData, deleteFormationFromFirestore, deletePlayFromFirestore, fetchFormationsForUser, fetchPlaysForUser, fetchTeamsForUser, isFirestoreEnabled, saveFormationToFirestore, savePlayToFirestore } from './services/firestore';
 import { User } from 'firebase/auth';
 
@@ -110,6 +115,9 @@ const PlaybookPage: React.FC = () => {
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
+  const [showOnboardingIntro, setShowOnboardingIntro] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareStatus, setShareStatus] = useState<string | null>(null);
 
   const navigate = useCallback((path: string) => {
     window.history.pushState({}, '', path);
@@ -143,6 +151,13 @@ const PlaybookPage: React.FC = () => {
       unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!user || user.isAnonymous) return;
+    if (!hasSeenOnboarding(user.uid)) {
+      setShowOnboardingIntro(true);
+    }
+  }, [user?.uid]);
 
   useEffect(() => {
     savePlaysToStorage(savedPlays);
@@ -238,6 +253,38 @@ const PlaybookPage: React.FC = () => {
     } finally {
       setIsDeletingAccount(false);
     }
+  };
+
+  const shareUrl = `${window.location.origin}/`;
+
+  const shareApp = () => {
+    setShareStatus(null);
+    setShowShareModal(true);
+  };
+
+  const copyShareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareStatus('Copied to clipboard.');
+    } catch (error) {
+      setShareStatus('Copy failed. Please select and copy the link.');
+    }
+  };
+
+  const startTour = () => {
+    if (user?.uid) {
+      setSeenOnboarding(user.uid);
+    }
+    setShowOnboardingIntro(false);
+    setPendingTour();
+    navigate('/builder');
+  };
+
+  const closeIntro = () => {
+    if (user?.uid) {
+      setSeenOnboarding(user.uid);
+    }
+    setShowOnboardingIntro(false);
   };
 
   const openPlay = (id: string) => {
@@ -370,6 +417,12 @@ const PlaybookPage: React.FC = () => {
         }}
         onManageAccount={() => {
           setShowAccountModal(true);
+        }}
+        onStartTour={() => {
+          startTour();
+        }}
+        onShareApp={() => {
+          shareApp();
         }}
         currentRoute="playbook"
         sublabel="Playbook"
@@ -549,6 +602,20 @@ const PlaybookPage: React.FC = () => {
           isDeleting={isDeletingAccount}
           error={deleteAccountError}
           userEmail={user?.email || null}
+        />
+
+        <OnboardingIntroModal
+          isOpen={showOnboardingIntro}
+          onStart={startTour}
+          onClose={closeIntro}
+        />
+
+        <ShareModal
+          isOpen={showShareModal}
+          shareUrl={shareUrl}
+          onClose={() => setShowShareModal(false)}
+          onCopy={copyShareLink}
+          copyStatus={shareStatus}
         />
 
         {showTeamModal && (

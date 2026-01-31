@@ -4,6 +4,8 @@ export const PLAY_STORAGE_KEY = 'ultiplan_saved_plays_v1';
 export const FORMATION_STORAGE_KEY = 'ultiplan_saved_formations_v1';
 export const PENDING_SELECTION_KEY = 'ultiplan_pending_selection_v1';
 export const PENDING_MANAGE_TEAMS_KEY = 'ultiplan_pending_manage_teams_v1';
+const ONBOARDING_SEEN_PREFIX = 'ultiplan_onboarding_seen_v1_';
+const PENDING_TOUR_KEY = 'ultiplan_onboarding_pending_tour_v1';
 
 export const loadPlaysFromStorage = (): Play[] => {
   const saved = localStorage.getItem(PLAY_STORAGE_KEY);
@@ -67,6 +69,25 @@ export const loadPendingManageTeams = () => localStorage.getItem(PENDING_MANAGE_
 
 export const clearPendingManageTeams = () => {
   localStorage.removeItem(PENDING_MANAGE_TEAMS_KEY);
+};
+
+export const hasSeenOnboarding = (uid: string) =>
+  localStorage.getItem(`${ONBOARDING_SEEN_PREFIX}${uid}`) === 'true';
+
+export const setSeenOnboarding = (uid: string) => {
+  localStorage.setItem(`${ONBOARDING_SEEN_PREFIX}${uid}`, 'true');
+};
+
+export const setPendingTour = () => {
+  localStorage.setItem(PENDING_TOUR_KEY, 'true');
+};
+
+export const consumePendingTour = () => {
+  const pending = localStorage.getItem(PENDING_TOUR_KEY) === 'true';
+  if (pending) {
+    localStorage.removeItem(PENDING_TOUR_KEY);
+  }
+  return pending;
 };
 
 export const clearPlaybookStorage = () => {

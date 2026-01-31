@@ -78,7 +78,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
 
   return (
     <div className="w-72 bg-slate-900 border-r border-slate-800 flex flex-col py-4 px-4 gap-4 shrink-0 z-10 shadow-2xl overflow-y-auto custom-scrollbar">
-      <div className={sectionClass}>
+      <div className={sectionClass} data-tour-id="workflow-play">
         <div className={sectionTitle}>Play</div>
         <input
           type="text"
@@ -89,7 +89,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
         />
       </div>
 
-      <div className={sectionClass}>
+      <div className={sectionClass} data-tour-id="workflow-offense">
         <div className="flex items-center justify-between">
           <h3 className={sectionTitle}>Step 1 · Offense</h3>
         </div>
@@ -186,7 +186,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
         </div>
       </div>
 
-      <div className={sectionClass}>
+      <div className={sectionClass} data-tour-id="workflow-force">
         <div className="flex items-center justify-between">
           <h3 className={sectionTitle}>Step 2 · Force</h3>
         </div>
@@ -199,7 +199,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
         </div>
       </div>
 
-      <div className={sectionClass}>
+      <div className={sectionClass} data-tour-id="workflow-defense">
         <div className="flex items-center justify-between">
           <h3 className={sectionTitle}>Step 3 · Defense</h3>
         </div>
@@ -239,7 +239,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
         </div>
       </div>
 
-      <div className={sectionClass}>
+      <div className={sectionClass} data-tour-id="workflow-draw">
         <div className="flex items-center justify-between">
           <h3 className={sectionTitle}>Step 4 · Draw Routes</h3>
         </div>
@@ -249,11 +249,12 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
       </div>
 
       <div className="mt-auto">
-        <div className={`${sectionClass} flex flex-col gap-2`}>
+        <div className={`${sectionClass} flex flex-col gap-2`} data-tour-id="workflow-save">
           <button
             onClick={onSaveFormation}
             disabled={!canSaveFormation}
             title={formationSaveReason || 'Save current formation'}
+            data-tour-id="workflow-save-formation"
             className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors text-[10px] font-bold tracking-widest uppercase bg-slate-900/70 hover:bg-slate-800 text-slate-300 border-slate-800 disabled:opacity-50"
           >
             Save Formation

@@ -138,7 +138,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <div className="flex gap-2">
               {!isAnimationActive ? (
-                <button onClick={onStartAnimation} disabled={!hasPlayers} className="px-4 py-1.5 rounded-md text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-emerald-900/20 transition-all"><PlayIcon size={14} fill="white" /> Run</button>
+                <button onClick={onStartAnimation} disabled={!hasPlayers} data-tour-id="run-button" className="px-4 py-1.5 rounded-md text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-emerald-900/20 transition-all"><PlayIcon size={14} fill="white" /> Run</button>
               ) : (
                 <>
                   <button onClick={onTogglePause} className="w-8 h-8 rounded-md bg-amber-600 hover:bg-amber-500 flex items-center justify-center shadow-lg shadow-amber-900/20 transition-all">{animationState === 'PLAYING' ? <PauseIcon size={16} fill="white" /> : <PlayIcon size={16} fill="white" />}</button>
@@ -148,7 +148,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             </div>
           </div>
         </div>
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3" data-tour-id="tactical-notes">
           <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
             <BookOpen size={14} /> Tactical Notes
           </h3>
@@ -194,7 +194,7 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
       </div>
-      <div className={`border-t border-slate-800 p-5 overflow-y-auto custom-scrollbar transition-opacity ${isPlaying ? 'opacity-40 grayscale' : 'opacity-100'}`}>
+      <div className={`border-t border-slate-800 p-5 overflow-y-auto custom-scrollbar transition-opacity ${isPlaying ? 'opacity-40 grayscale' : 'opacity-100'}`} data-tour-id="selection-details">
         <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-2"><Info size={14} /> Selection Details</h3>
         {selectedPlayer ? (
           <div className="bg-slate-800 p-4 rounded-lg border border-slate-700 shadow-inner">

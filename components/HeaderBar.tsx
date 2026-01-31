@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Menu, LayoutGrid, Users, LogOut, LogIn, Library, BookOpen, UserRound } from 'lucide-react';
+import { Menu, LayoutGrid, Users, LogOut, LogIn, Library, BookOpen, UserRound, Sparkles, Share2 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { signInWithGoogle, signOutUser } from '../services/auth';
 
@@ -8,6 +8,8 @@ interface HeaderBarProps {
   onOpenBuilder: () => void;
   onManageTeams: () => void;
   onManageAccount?: () => void;
+  onStartTour?: () => void;
+  onShareApp?: () => void;
   currentRoute: 'playbook' | 'builder';
   sublabel?: string;
   user: User | null;
@@ -18,6 +20,8 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
   onOpenBuilder,
   onManageTeams,
   onManageAccount,
+  onStartTour,
+  onShareApp,
   currentRoute,
   sublabel,
   user
@@ -82,6 +86,30 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
           </button>
           {isMenuOpen && (
             <div className="absolute right-0 mt-2 w-48 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50 overflow-hidden">
+              {onShareApp && (
+                <button
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    onShareApp();
+                  }}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-200 hover:bg-slate-800"
+                >
+                  <Share2 size={14} />
+                  Share Ultiplan
+                </button>
+              )}
+              {isSignedIn && onStartTour && (
+                <button
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    onStartTour();
+                  }}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-200 hover:bg-slate-800"
+                >
+                  <Sparkles size={14} />
+                  Start Tour
+                </button>
+              )}
               {isSignedIn && onManageAccount && (
                 <button
                   onClick={() => {

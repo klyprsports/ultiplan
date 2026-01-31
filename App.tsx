@@ -6,11 +6,14 @@ import Sidebar from './components/Sidebar';
 import HeaderBar from './components/HeaderBar';
 import WorkflowSidebar from './components/WorkflowSidebar';
 import AccountModal from './components/AccountModal';
+import ShareModal from './components/ShareModal';
 import { Player, InteractionMode, Play, Team, Point, Force, Formation } from './types';
-import { loadPlaysFromStorage, savePlaysToStorage, loadFormationsFromStorage, saveFormationsToStorage, normalizeFormationPlayers, normalizePlay, loadPendingSelection, clearPendingSelection, setPendingManageTeams, clearPlaybookStorage } from './services/storage';
+import { loadPlaysFromStorage, savePlaysToStorage, loadFormationsFromStorage, saveFormationsToStorage, normalizeFormationPlayers, normalizePlay, loadPendingSelection, clearPendingSelection, setPendingManageTeams, clearPlaybookStorage, hasSeenOnboarding, setSeenOnboarding, consumePendingTour } from './services/storage';
 import { signInWithGoogle, getCurrentUser, subscribeToAuth, deleteCurrentUser } from './services/auth';
 import { isFirestoreEnabled, ensureUserDocument, fetchFormationsForUser, fetchPlaysForUser, fetchTeamsForUser, savePlayToFirestore, saveFormationToFirestore, deleteAccountData } from './services/firestore';
 import { DEFAULT_SPEED, DEFAULT_ACCELERATION, MAX_PLAYERS_PER_TEAM, FIELD_WIDTH, buildPresetFormation, getDumpOffsetX } from './services/formations';
+import OnboardingIntroModal from './components/OnboardingIntroModal';
+import OnboardingTour, { OnboardingStep } from './components/OnboardingTour';
 
 const generateId = () => {
   try {
@@ -54,6 +57,12 @@ const App: React.FC = () => {
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareStatus, setShareStatus] = useState<string | null>(null);
+  const [showOnboardingIntro, setShowOnboardingIntro] = useState(false);
+  const [isTourActive, setIsTourActive] = useState(false);
+  const [tourStep, setTourStep] = useState(0);
+  const [selectionStepTriggered, setSelectionStepTriggered] = useState(false);
   const [playOwnerId, setPlayOwnerId] = useState<string | null>(null);
   const [playCreatedBy, setPlayCreatedBy] = useState<string | null>(null);
   const [playSourceId, setPlaySourceId] = useState<string | null>(null);
@@ -140,6 +149,22 @@ const App: React.FC = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!authUser || authUser.isAnonymous) return;
+    const uid = authUser.uid;
+    const pendingTour = consumePendingTour();
+    if (pendingTour) {
+      setShowOnboardingIntro(false);
+      setIsTourActive(true);
+      setTourStep(0);
+      setSeenOnboarding(uid);
+      return;
+    }
+    if (!hasSeenOnboarding(uid)) {
+      setShowOnboardingIntro(true);
+    }
+  }, [authUser?.uid]);
+
   const handleDeleteAccount = async () => {
     setIsDeletingAccount(true);
     setDeleteAccountError(null);
@@ -159,6 +184,121 @@ const App: React.FC = () => {
       setIsDeletingAccount(false);
     }
   };
+
+  const shareUrl = `${window.location.origin}/`;
+
+  const shareApp = () => {
+    setShareStatus(null);
+    setShowShareModal(true);
+  };
+
+  const copyShareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareStatus('Copied to clipboard.');
+    } catch (error) {
+      setShareStatus('Copy failed. Please select and copy the link.');
+    }
+  };
+
+  const tourSteps: OnboardingStep[] = useMemo(() => ([
+    {
+      id: 'play-name',
+      title: 'Name your play',
+      body: 'Give your play a name so you can save and find it later.',
+      target: '[data-tour-id="workflow-play"]'
+    },
+    {
+      id: 'add-players',
+      title: 'Add offense',
+      body: 'Drag an offensive player token to the field or pick a formation.',
+      target: '[data-tour-id="workflow-offense"]'
+    },
+    {
+      id: 'select-force',
+      title: 'Select a force',
+      body: 'Choose the force direction. Auto-defense placement uses this setting.',
+      target: '[data-tour-id="workflow-force"]'
+    },
+    {
+      id: 'add-defense',
+      title: 'Add defense',
+      body: 'Drag defensive players in or auto-assign matchups.',
+      target: '[data-tour-id="workflow-defense"]'
+    },
+    {
+      id: 'field',
+      title: 'Place players on the field',
+      body: 'Drag players to position them on the field.',
+      target: '[data-tour-id="field"]'
+    },
+    {
+      id: 'selection-details',
+      title: 'Selection details',
+      body: 'Select a player to edit role, speed, and routes.',
+      target: '[data-tour-id="selection-details"]'
+    },
+    {
+      id: 'draw-routes',
+      title: 'Draw routes',
+      body: 'Select an offensive player and click the field to add route points.',
+      target: '[data-tour-id="workflow-draw"]'
+    },
+    {
+      id: 'tactical-notes',
+      title: 'Tactical notes',
+      body: 'Add notes so teammates understand timing and intent.',
+      target: '[data-tour-id="tactical-notes"]'
+    },
+    {
+      id: 'run-play',
+      title: 'Run the play',
+      body: 'Animate your play to see the timing and spacing.',
+      target: '[data-tour-id="run-button"]'
+    },
+    {
+      id: 'save-formation',
+      title: 'Save the formation',
+      body: 'Save a reusable formation before you finish the full play.',
+      target: '[data-tour-id="workflow-save-formation"]'
+    },
+    {
+      id: 'save',
+      title: 'Save your play',
+      body: 'Save when you are ready, then reuse it from your playbook.',
+      target: '[data-tour-id="workflow-save"]'
+    }
+  ]), []);
+
+  const startTour = () => {
+    if (authUser?.uid) setSeenOnboarding(authUser.uid);
+    setShowOnboardingIntro(false);
+    setIsTourActive(true);
+    setTourStep(0);
+    setSelectionStepTriggered(false);
+  };
+
+  const closeIntro = () => {
+    if (authUser?.uid) setSeenOnboarding(authUser.uid);
+    setShowOnboardingIntro(false);
+  };
+
+  const closeTour = () => {
+    if (authUser?.uid) setSeenOnboarding(authUser.uid);
+    setIsTourActive(false);
+    setSelectionStepTriggered(false);
+  };
+
+  useEffect(() => {
+    if (!isTourActive || selectionStepTriggered) return;
+    if (players.length === 1) {
+      const stepIndex = tourSteps.findIndex((step) => step.id === 'selection-details');
+      if (stepIndex >= 0) {
+        setTourStep(stepIndex);
+        setSelectionStepTriggered(true);
+      }
+    }
+  }, [isTourActive, selectionStepTriggered, players.length, tourSteps]);
 
   useEffect(() => {
     if (!authUser?.uid) return;
@@ -853,6 +993,36 @@ const App: React.FC = () => {
         userEmail={authUser?.email || null}
       />
 
+      <ShareModal
+        isOpen={showShareModal}
+        shareUrl={shareUrl}
+        onClose={() => setShowShareModal(false)}
+        onCopy={copyShareLink}
+        copyStatus={shareStatus}
+      />
+
+      <OnboardingIntroModal
+        isOpen={showOnboardingIntro}
+        onStart={startTour}
+        onClose={closeIntro}
+      />
+
+      {isTourActive && (
+        <OnboardingTour
+          steps={tourSteps}
+          stepIndex={tourStep}
+          onPrev={() => setTourStep((prev) => Math.max(0, prev - 1))}
+          onNext={() => {
+            if (tourStep >= tourSteps.length - 1) {
+              closeTour();
+            } else {
+              setTourStep((prev) => Math.min(tourSteps.length - 1, prev + 1));
+            }
+          }}
+          onClose={closeTour}
+        />
+      )}
+
       <HeaderBar
         onOpenPlaybook={() => {
           window.history.pushState({}, '', '/playbook');
@@ -869,6 +1039,12 @@ const App: React.FC = () => {
         }}
         onManageAccount={() => {
           setShowAccountModal(true);
+        }}
+        onStartTour={() => {
+          startTour();
+        }}
+        onShareApp={() => {
+          shareApp();
         }}
         currentRoute="builder"
         sublabel="Builder"
@@ -912,24 +1088,26 @@ const App: React.FC = () => {
         />
 
         <div className="flex-1 bg-slate-950 flex flex-col items-center justify-center overflow-auto p-8 relative">
-          <Field
-            players={players}
-            mode={mode}
-            selectedPlayerId={selectedPlayerId}
-            onFieldClick={handleFieldClick}
-            onUpdatePlayer={updatePlayerPosition}
-            onAddPathPoint={addPathPoint}
-            onSelectPlayer={setSelectedPlayerId}
-            animationTime={isAnimationActive ? animationTime : null}
-            force={force}
-            onDropOffense={addOffensePlayerWithLabel}
-            onDropDefense={addDefensePlayerWithLabel}
-            onDropResult={(success) => {
-              if (success) setDraggingToken(null);
-            }}
-            draggingToken={draggingToken}
-            onDebugEvent={() => {}}
-          />
+          <div data-tour-id="field">
+            <Field
+              players={players}
+              mode={mode}
+              selectedPlayerId={selectedPlayerId}
+              onFieldClick={handleFieldClick}
+              onUpdatePlayer={updatePlayerPosition}
+              onAddPathPoint={addPathPoint}
+              onSelectPlayer={setSelectedPlayerId}
+              animationTime={isAnimationActive ? animationTime : null}
+              force={force}
+              onDropOffense={addOffensePlayerWithLabel}
+              onDropDefense={addDefensePlayerWithLabel}
+              onDropResult={(success) => {
+                if (success) setDraggingToken(null);
+              }}
+              draggingToken={draggingToken}
+              onDebugEvent={() => {}}
+            />
+          </div>
         </div>
 
         <Sidebar 
