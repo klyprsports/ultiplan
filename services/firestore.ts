@@ -109,6 +109,8 @@ const serializePlay = (play: Play, uid: string) => {
     createdBy: play.createdBy || uid,
     lastEditedBy: uid,
     sourcePlayId: play.sourcePlayId || null,
+    startFromPlayId: play.startFromPlayId || null,
+    startLocked: play.startLocked || false,
     createdAt: play.createdAt || serverTimestamp(),
     updatedAt: serverTimestamp()
   };
@@ -136,6 +138,8 @@ const hydratePlay = (data: Omit<Play, 'id'>, id: string): Play => ({
   ownerId: data.ownerId,
   visibility: data.visibility || 'private',
   sharedTeamIds: data.sharedTeamIds || [],
+  startFromPlayId: data.startFromPlayId || undefined,
+  startLocked: Boolean(data.startLocked),
   throws: (data.throws || []).map((t) => ({
     id: t.id,
     throwerId: t.throwerId,

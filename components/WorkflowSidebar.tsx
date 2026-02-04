@@ -6,6 +6,7 @@ interface WorkflowSidebarProps {
   players: Player[];
   mode: InteractionMode;
   isAnimationActive: boolean;
+  isStartLocked: boolean;
   activeFormation: 'vertical' | 'side' | 'ho' | 'custom' | null;
   setActiveFormation: (formation: 'vertical' | 'side' | 'ho' | 'custom' | null) => void;
   setMode: (mode: InteractionMode) => void;
@@ -27,6 +28,9 @@ interface WorkflowSidebarProps {
   canSavePlay: boolean;
   playSaveReason: string;
   saveStatus: 'idle' | 'saving' | 'saved';
+  onBuildNextPlay: () => void;
+  canBuildNextPlay: boolean;
+  buildNextPlayReason: string;
   maxPlayersPerTeam: number;
   usedOffenseLabels: number[];
   usedDefenseLabels: number[];
@@ -39,6 +43,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
   players,
   mode,
   isAnimationActive,
+  isStartLocked,
   activeFormation,
   setActiveFormation,
   setMode,
@@ -60,6 +65,9 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
   canSavePlay,
   playSaveReason,
   saveStatus,
+  onBuildNextPlay,
+  canBuildNextPlay,
+  buildNextPlayReason,
   maxPlayersPerTeam,
   usedOffenseLabels,
   usedDefenseLabels,
@@ -78,6 +86,11 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
 
   return (
     <div className="w-72 bg-slate-900 border-r border-slate-800 flex flex-col py-4 px-4 gap-4 shrink-0 z-10 shadow-2xl overflow-y-auto custom-scrollbar">
+      {isStartLocked && (
+        <div className="rounded-2xl border border-indigo-500/40 bg-indigo-500/10 px-3 py-2 text-[10px] text-indigo-200 uppercase tracking-[0.26em]">
+          Sequence play - start positions locked
+        </div>
+      )}
       <div className={sectionClass} data-tour-id="workflow-play">
         <div className={sectionTitle}>Play</div>
         <input
@@ -103,7 +116,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
                 return (
                 <div
                   key={labelNum}
-                  draggable={!isAnimationActive && !isUsed}
+                  draggable={!isAnimationActive && !isStartLocked && !isUsed}
                   onDragStart={(e) => {
                     const payload = `offense:${labelNum}`;
                     e.dataTransfer.setData('application/x-ultiplan-player', payload);
@@ -113,7 +126,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
                     onTokenDragStart('offense', labelNum);
                   }}
                   onDragEnd={() => onTokenDragEnd()}
-                  className={`w-5 h-5 rounded-full text-white text-[8px] font-bold flex items-center justify-center shadow-sm border border-blue-400/60 ${isUsed || isDragging ? 'bg-blue-900/40 text-blue-200/60 cursor-not-allowed' : 'bg-blue-600 cursor-grab active:cursor-grabbing'}`}
+                  className={`w-5 h-5 rounded-full text-white text-[8px] font-bold flex items-center justify-center shadow-sm border border-blue-400/60 ${isUsed || isDragging || isStartLocked ? 'bg-blue-900/40 text-blue-200/60 cursor-not-allowed' : 'bg-blue-600 cursor-grab active:cursor-grabbing'}`}
                   title={`Drag O${labelNum} to the field`}
                 >
                   O{labelNum}
@@ -126,7 +139,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
           <div className="relative">
             <button
               onClick={() => setShowFormationMenu(prev => !prev)}
-              disabled={isAnimationActive}
+              disabled={isAnimationActive || isStartLocked}
               className={buttonClass}
             >
               <span className="flex items-center gap-2">Select from existing formation</span>
@@ -168,7 +181,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
                 )}
                 <button
                   onClick={() => { onOpenSaveFormationModal(); setShowFormationMenu(false); }}
-                  disabled={players.length === 0 || !hasUnsavedFormation}
+                  disabled={players.length === 0 || !hasUnsavedFormation || isStartLocked}
                   className="w-full text-left px-4 py-2.5 text-xs font-medium text-emerald-300 hover:bg-slate-800 disabled:text-slate-600 disabled:hover:bg-transparent"
                 >
                   Save current formation...
@@ -176,7 +189,8 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
                 <div className="h-px bg-slate-800 my-1" />
                 <button
                   onClick={() => { onCreateCustomFormation(); setShowFormationMenu(false); }}
-                  className="w-full text-left px-4 py-2.5 text-xs font-medium text-emerald-300 hover:bg-slate-800 rounded-lg"
+                  disabled={isStartLocked}
+                  className="w-full text-left px-4 py-2.5 text-xs font-medium text-emerald-300 hover:bg-slate-800 rounded-lg disabled:text-slate-600 disabled:hover:bg-transparent"
                 >
                   Create new formation
                 </button>
@@ -213,7 +227,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
                 return (
                 <div
                   key={labelNum}
-                  draggable={!isAnimationActive && !isUsed}
+                  draggable={!isAnimationActive && !isStartLocked && !isUsed}
                   onDragStart={(e) => {
                     const payload = `defense:${labelNum}`;
                     e.dataTransfer.setData('application/x-ultiplan-player', payload);
@@ -223,7 +237,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
                     onTokenDragStart('defense', labelNum);
                   }}
                   onDragEnd={() => onTokenDragEnd()}
-                  className={`w-5 h-5 rounded-full text-white text-[8px] font-bold flex items-center justify-center shadow-sm border border-red-400/60 ${isUsed || isDragging ? 'bg-red-900/40 text-red-200/60 cursor-not-allowed' : 'bg-red-600 cursor-grab active:cursor-grabbing'}`}
+                  className={`w-5 h-5 rounded-full text-white text-[8px] font-bold flex items-center justify-center shadow-sm border border-red-400/60 ${isUsed || isDragging || isStartLocked ? 'bg-red-900/40 text-red-200/60 cursor-not-allowed' : 'bg-red-600 cursor-grab active:cursor-grabbing'}`}
                   title={`Drag D${labelNum} to the field`}
                 >
                   D{labelNum}
@@ -233,7 +247,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
             </div>
           )}
           <div className="text-[9px] text-slate-500 uppercase tracking-[0.3em] text-center">Or</div>
-          <button onClick={onAutoAssignDefense} disabled={isAnimationActive || offenseCount === 0} className={buttonClass}>
+          <button onClick={onAutoAssignDefense} disabled={isAnimationActive || offenseCount === 0 || isStartLocked} className={buttonClass}>
             <ShieldAlert size={14} className="text-red-400" /> Auto-Assign Defense
           </button>
         </div>
@@ -266,6 +280,14 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
             className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors text-[10px] font-bold tracking-widest uppercase bg-emerald-500/90 hover:bg-emerald-400 text-emerald-950 border-emerald-500/60 disabled:opacity-50"
           >
             {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved' : 'Save Play'}
+          </button>
+          <button
+            onClick={onBuildNextPlay}
+            disabled={!canBuildNextPlay}
+            title={buildNextPlayReason || 'Build the next play in this sequence'}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors text-[10px] font-bold tracking-widest uppercase bg-indigo-500/90 hover:bg-indigo-400 text-indigo-950 border-indigo-500/60 disabled:opacity-50"
+          >
+            Continue with Next Play
           </button>
         </div>
       </div>

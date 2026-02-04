@@ -49,6 +49,8 @@ export interface Play {
   createdBy?: string;
   lastEditedBy?: string;
   sourcePlayId?: string;
+  startFromPlayId?: string;
+  startLocked?: boolean;
 }
 
 export interface Formation {

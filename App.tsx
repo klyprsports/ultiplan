@@ -79,6 +79,8 @@ const App: React.FC = () => {
   const [playOwnerId, setPlayOwnerId] = useState<string | null>(null);
   const [playCreatedBy, setPlayCreatedBy] = useState<string | null>(null);
   const [playSourceId, setPlaySourceId] = useState<string | null>(null);
+  const [startFromPlayId, setStartFromPlayId] = useState<string | null>(null);
+  const [startLocked, setStartLocked] = useState(false);
   const [formationOwnerId, setFormationOwnerId] = useState<string | null>(null);
   const [formationCreatedBy, setFormationCreatedBy] = useState<string | null>(null);
   const [formationSourceId, setFormationSourceId] = useState<string | null>(null);
@@ -368,9 +370,9 @@ const App: React.FC = () => {
     }
   }, [savedPlays, savedFormations, playbookLoaded]);
 
-  const basePlayDuration = useMemo(() => {
+  const computeBasePlayDuration = useCallback((playPlayers: Player[]) => {
     let maxDur = 0;
-    players.forEach(player => {
+    playPlayers.forEach(player => {
       if (player.path.length === 0) return;
       const points = [{ x: player.x, y: player.y }, ...player.path];
       let totalTime = 0;
@@ -383,7 +385,11 @@ const App: React.FC = () => {
       if (totalTime > maxDur) maxDur = totalTime;
     });
     return maxDur + 1.5;
-  }, [players]);
+  }, []);
+
+  const basePlayDuration = useMemo(() => {
+    return computeBasePlayDuration(players);
+  }, [players, computeBasePlayDuration]);
 
   const getThrowSpeed = useCallback((power: 'soft' | 'medium' | 'hard') => {
     if (power === 'soft') return 8;
@@ -456,11 +462,13 @@ const App: React.FC = () => {
     return points[points.length - 1];
   }, []);
 
-  const throwPlans = useMemo(() => {
+  const REACTION_DELAY = 0.25;
+
+  const computeThrowPlansForPlay = useCallback((playPlayers: Player[], playThrows: Play['throws'] = []) => {
     const discOffset = { x: 1.2, y: -1.2 };
-    const plans = (throws || []).map((t) => {
-      const thrower = players.find((p) => p.id === t.throwerId);
-      const receiver = players.find((p) => p.id === t.receiverId);
+    const plans = (playThrows || []).map((t) => {
+      const thrower = playPlayers.find((p) => p.id === t.throwerId);
+      const receiver = playPlayers.find((p) => p.id === t.receiverId);
       if (!thrower || !receiver) return null;
       const throwerAtRelease = calculatePositionAtTime(thrower, t.releaseTime);
       const start = { x: throwerAtRelease.x + discOffset.x, y: throwerAtRelease.y + discOffset.y };
@@ -486,7 +494,90 @@ const App: React.FC = () => {
       };
     }).filter((plan): plan is NonNullable<typeof plan> => Boolean(plan));
     return plans.sort((a, b) => a.releaseTime - b.releaseTime);
-  }, [throws, players, calculatePositionAtTime, getThrowSpeed]);
+  }, [calculatePositionAtTime, getThrowSpeed]);
+
+  const computeMaxPlayDurationForPlay = useCallback((playPlayers: Player[], playThrows: Play['throws'] = []) => {
+    const maxThrowEnd = computeThrowPlansForPlay(playPlayers, playThrows).reduce((acc, plan) => Math.max(acc, plan.endTime), 0);
+    return Math.max(computeBasePlayDuration(playPlayers), maxThrowEnd);
+  }, [computeBasePlayDuration, computeThrowPlansForPlay]);
+
+  const getDiscHolderForPlay = useCallback((playPlayers: Player[], playThrows: Play['throws'] = [], time: number) => {
+    const offense = playPlayers.filter((p) => p.team === 'offense');
+    const initialHolderId = offense.find((p) => p.hasDisc)?.id ?? offense[0]?.id ?? null;
+    if (!playThrows || playThrows.length === 0) return initialHolderId;
+    const throwPlansForPlay = computeThrowPlansForPlay(playPlayers, playThrows);
+    let holderId = initialHolderId;
+    for (const plan of throwPlansForPlay) {
+      if (time >= plan.endTime) {
+        holderId = plan.receiverId;
+      }
+    }
+    return holderId;
+  }, [computeThrowPlansForPlay]);
+
+  const getEndPositionsByLabel = useCallback((playPlayers: Player[], playThrows: Play['throws'] = []) => {
+    const endTime = computeMaxPlayDurationForPlay(playPlayers, playThrows);
+    const holderId = getDiscHolderForPlay(playPlayers, playThrows, endTime);
+    const defense = playPlayers.filter((p) => p.team === 'defense');
+    const offense = playPlayers.filter((p) => p.team === 'offense');
+    const defensiveAssignments = new Map<string, string>();
+    defense.forEach((defender) => {
+      let closestId = '';
+      let minDist = Infinity;
+      offense.forEach((offensePlayer) => {
+        const dx = defender.x - offensePlayer.x;
+        const dy = defender.y - offensePlayer.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < minDist) {
+          minDist = dist;
+          closestId = offensePlayer.id;
+        }
+      });
+      if (closestId) defensiveAssignments.set(defender.id, closestId);
+    });
+    const endPositions = new Map<string, { x: number; y: number; hasDisc: boolean }>();
+    playPlayers.forEach((player) => {
+      let pos = calculatePositionAtTime(player, endTime);
+      if (player.team === 'defense') {
+        const targetId = defensiveAssignments.get(player.id);
+        const targetOffense = playPlayers.find((p) => p.id === targetId);
+        if (targetOffense) {
+          const delayedTime = Math.max(0, endTime - REACTION_DELAY);
+          const targetPosAtDelayedTime = calculatePositionAtTime(targetOffense, delayedTime);
+          pos = {
+            x: player.x + (targetPosAtDelayedTime.x - targetOffense.x),
+            y: player.y + (targetPosAtDelayedTime.y - targetOffense.y)
+          };
+        }
+      }
+      const key = `${player.team}:${player.label}`;
+      endPositions.set(key, { x: pos.x, y: pos.y, hasDisc: player.id === holderId });
+    });
+    return endPositions;
+  }, [calculatePositionAtTime, computeMaxPlayDurationForPlay, getDiscHolderForPlay]);
+
+  const alignPlayersToEndState = useCallback((currentPlayers: Player[], endPositions: Map<string, { x: number; y: number; hasDisc: boolean }>) => {
+    let changed = false;
+    const aligned = currentPlayers.map((player) => {
+      const key = `${player.team}:${player.label}`;
+      const target = endPositions.get(key);
+      if (!target) return player;
+      const dx = target.x - player.x;
+      const dy = target.y - player.y;
+      const nextPath = (dx === 0 && dy === 0)
+        ? player.path
+        : player.path.map((pt) => ({ x: pt.x + dx, y: pt.y + dy }));
+      if (dx !== 0 || dy !== 0 || player.hasDisc !== target.hasDisc) {
+        changed = true;
+        return { ...player, x: target.x, y: target.y, path: nextPath, hasDisc: target.hasDisc };
+      }
+      return player;
+    });
+    return { players: aligned, changed };
+  }, []);
+  const throwPlans = useMemo(() => {
+    return computeThrowPlansForPlay(players, throws || []);
+  }, [throws, players, computeThrowPlansForPlay]);
 
   const getDiscPosition = useCallback((plan: {
     start: Point;
@@ -601,6 +692,7 @@ const App: React.FC = () => {
   };
 
   const addOffensePlayerWithLabel = (labelNum: number, x: number, y: number) => {
+    if (startLocked) return false;
     let added = false;
     const id = generateId();
     const newPlayer: Player = {
@@ -629,6 +721,7 @@ const App: React.FC = () => {
   };
 
   const addDefensePlayerWithLabel = (labelNum: number, x: number, y: number) => {
+    if (startLocked) return false;
     let added = false;
     const id = generateId();
     const newPlayer: Player = {
@@ -656,6 +749,7 @@ const App: React.FC = () => {
   };
 
   const updatePlayerPosition = (id: string, x: number, y: number) => {
+    if (startLocked) return;
     setPlayers(prev => prev.map(p => p.id === id ? { ...p, x, y } : p));
   };
 
@@ -735,6 +829,7 @@ const App: React.FC = () => {
   }, [getBreakXOffset, getForceXOffset]);
 
   const autoAssignDefense = () => {
+    if (startLocked) return;
     const offense = players.filter(p => p.team === 'offense');
     if (offense.length === 0) return;
     const discHolder = offense.find(p => p.hasDisc) || offense[0];
@@ -949,7 +1044,9 @@ const App: React.FC = () => {
       sharedTeamIds: visibility === 'team' ? sharedTeamIds : [],
       createdBy: playCreatedBy || currentUser?.uid,
       lastEditedBy: currentUser?.uid,
-      sourcePlayId: playSourceId || undefined
+      sourcePlayId: playSourceId || undefined,
+      startFromPlayId: startFromPlayId || undefined,
+      startLocked: startLocked || undefined
     };
     setSavedPlays(prev => {
       const existing = prev.findIndex(p => p.id === newPlay.id);
@@ -974,20 +1071,105 @@ const App: React.FC = () => {
     }, 600);
   };
 
-  const loadPlay = (play: Play) => {
+  const buildNextPlayInSequence = () => {
+    if (!editingPlayId) return;
+    const currentUser = getCurrentUser();
+    const endPositions = getEndPositionsByLabel(players, throws || []);
+    const nextPlayers = players.map((player) => {
+      const key = `${player.team}:${player.label}`;
+      const target = endPositions.get(key);
+      if (!target) {
+        return { ...player, path: [], hasDisc: false };
+      }
+      return { ...player, x: target.x, y: target.y, path: [], hasDisc: target.hasDisc };
+    });
+    const existing = savedPlays.find((p) => p.id === editingPlayId);
+    const visibility = existing?.visibility || 'private';
+    const sharedTeamIds = existing?.sharedTeamIds || [];
+    const nextPlay: Play = {
+      id: generateId(),
+      ownerId: playOwnerId || currentUser?.uid,
+      name: `${playName} - Next`,
+      players: nextPlayers,
+      force,
+      description: '',
+      throws: [],
+      visibility,
+      sharedTeamIds: visibility === 'team' ? sharedTeamIds : [],
+      createdBy: currentUser?.uid,
+      lastEditedBy: currentUser?.uid,
+      startFromPlayId: editingPlayId,
+      startLocked: true
+    };
+    setSavedPlays((prev) => [nextPlay, ...prev]);
+    setPlayers(nextPlayers);
+    setThrows([]);
+    setPlayName(nextPlay.name);
+    setPlayDescription('');
+    setEditingPlayId(nextPlay.id);
+    setPlayOwnerId(nextPlay.ownerId || null);
+    setPlayCreatedBy(nextPlay.createdBy || null);
+    setPlaySourceId(null);
+    setStartFromPlayId(editingPlayId);
+    setStartLocked(true);
+    setSaveStatus('idle');
+    setSelectedPlayerId(null);
+    setMode(InteractionMode.SELECT);
     stopAnimation();
-    setPlayers(play.players);
-    setThrows(play.throws || []);
-    setPlayName(play.name);
-    setForce(play.force);
-    setPlayDescription(play.description || '');
-    setEditingPlayId(play.id);
-    setPlayOwnerId(play.ownerId || getCurrentUser()?.uid || null);
-    setPlayCreatedBy(play.createdBy || null);
-    setPlaySourceId(play.sourcePlayId || null);
+    if (isFirestoreEnabled()) {
+      savePlayToFirestore(nextPlay).catch((error) => console.error('Failed to save play to Firestore', error));
+    }
+  };
+
+  const resolveSequencePlay = useCallback((play: Play) => {
+    if (!play.startLocked || !play.startFromPlayId) return play;
+    const parent = savedPlays.find((p) => p.id === play.startFromPlayId);
+    if (!parent) return play;
+    const endPositions = getEndPositionsByLabel(parent.players, parent.throws || []);
+    const aligned = alignPlayersToEndState(play.players, endPositions);
+    if (!aligned.changed) return play;
+    return { ...play, players: aligned.players };
+  }, [savedPlays, getEndPositionsByLabel, alignPlayersToEndState]);
+
+  const loadPlay = (play: Play) => {
+    const resolved = resolveSequencePlay(play);
+    stopAnimation();
+    setPlayers(resolved.players);
+    setThrows(resolved.throws || []);
+    setPlayName(resolved.name);
+    setForce(resolved.force);
+    setPlayDescription(resolved.description || '');
+    setEditingPlayId(resolved.id);
+    setPlayOwnerId(resolved.ownerId || getCurrentUser()?.uid || null);
+    setPlayCreatedBy(resolved.createdBy || null);
+    setPlaySourceId(resolved.sourcePlayId || null);
+    setStartFromPlayId(resolved.startFromPlayId || null);
+    setStartLocked(Boolean(resolved.startLocked));
     setSelectedPlayerId(null);
     setMode(InteractionMode.SELECT);
   };
+
+  useEffect(() => {
+    if (!startLocked || !startFromPlayId) return;
+    const parent = savedPlays.find((p) => p.id === startFromPlayId);
+    if (!parent) return;
+    const endPositions = getEndPositionsByLabel(parent.players, parent.throws || []);
+    setPlayers((prev) => {
+      const aligned = alignPlayersToEndState(prev, endPositions);
+      return aligned.changed ? aligned.players : prev;
+    });
+    if (editingPlayId) {
+      setSavedPlays((prev) => {
+        const index = prev.findIndex((p) => p.id === editingPlayId);
+        if (index === -1) return prev;
+        const aligned = alignPlayersToEndState(prev[index].players, endPositions);
+        if (!aligned.changed) return prev;
+        const next = [...prev];
+        next[index] = { ...prev[index], players: aligned.players };
+        return next;
+      });
+    }
+  }, [startLocked, startFromPlayId, editingPlayId, savedPlays, getEndPositionsByLabel, alignPlayersToEndState]);
 
   const saveFormation = () => {
     const name = (tempFormationName || 'New Formation').trim();
@@ -1029,6 +1211,7 @@ const App: React.FC = () => {
   };
 
   const loadFormation = (formation: Formation) => {
+    if (startLocked) return;
     stopAnimation();
     setPlayers(formation.players);
     setThrows([]);
@@ -1093,6 +1276,7 @@ const App: React.FC = () => {
 
   const applyFormationNearOwnEndzone = (formation: 'vertical' | 'side' | 'ho') => {
     if (isAnimationActive) return;
+    if (startLocked) return;
     const offensePlayers = buildPresetFormation(formation, force, () => generateId());
 
     setPlayers(prev => {
@@ -1141,6 +1325,9 @@ const App: React.FC = () => {
     return getDiscStateAtTime(animationTime);
   }, [isAnimationActive, players, animationTime, getDiscStateAtTime]);
 
+  const canBuildNextPlay = Boolean(editingPlayId);
+  const buildNextPlayReason = editingPlayId ? '' : 'Save this play before starting a sequence.';
+
   return (
     <div className="flex flex-col h-screen bg-slate-950 text-slate-100 font-sans overflow-hidden">
       {/* New Play Modal */}
@@ -1169,6 +1356,8 @@ const App: React.FC = () => {
                 setPlayOwnerId(currentUser?.uid || null);
                 setPlayCreatedBy(currentUser?.uid || null);
                 setPlaySourceId(null);
+                setStartFromPlayId(null);
+                setStartLocked(false);
                 setShowNewPlayModal(false);
                 stopAnimation();
               }} className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition-all">Create</button>
@@ -1366,6 +1555,7 @@ const App: React.FC = () => {
           players={players}
           mode={mode}
           isAnimationActive={isAnimationActive}
+          isStartLocked={startLocked}
           activeFormation={activeFormation}
           setActiveFormation={setActiveFormation}
           setMode={setMode}
@@ -1387,6 +1577,9 @@ const App: React.FC = () => {
           canSavePlay={players.some(p => p.team === 'offense')}
           playSaveReason={playSaveReason}
           saveStatus={saveStatus}
+          onBuildNextPlay={buildNextPlayInSequence}
+          canBuildNextPlay={canBuildNextPlay}
+          buildNextPlayReason={buildNextPlayReason}
           maxPlayersPerTeam={MAX_PLAYERS_PER_TEAM}
           usedOffenseLabels={players.filter(p => p.team === 'offense').map(p => parseInt(p.label.replace('O', ''), 10)).filter(n => !Number.isNaN(n))}
           usedDefenseLabels={players.filter(p => p.team === 'defense').map(p => parseInt(p.label.replace('D', ''), 10)).filter(n => !Number.isNaN(n))}
@@ -1407,6 +1600,7 @@ const App: React.FC = () => {
               onSelectPlayer={handleSelectPlayer}
               animationTime={animationTime}
               isAnimationActive={isAnimationActive}
+              isStartLocked={startLocked}
               force={force}
               onDropOffense={addOffensePlayerWithLabel}
               onDropDefense={addDefensePlayerWithLabel}

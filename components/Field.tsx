@@ -12,6 +12,7 @@ interface FieldProps {
   onSelectPlayer: (id: string) => void;
   animationTime: number | null;
   isAnimationActive: boolean;
+  isStartLocked?: boolean;
   force: Force;
   onDropOffense: (labelNum: number, x: number, y: number) => boolean;
   onDropDefense: (labelNum: number, x: number, y: number) => boolean;
@@ -39,6 +40,7 @@ const Field: React.FC<FieldProps> = ({
   onSelectPlayer,
   animationTime,
   isAnimationActive,
+  isStartLocked = false,
   force,
   onDropOffense,
   onDropDefense,
@@ -100,7 +102,13 @@ const Field: React.FC<FieldProps> = ({
     const playerId = target.closest('[data-player-id]')?.getAttribute('data-player-id');
     if (playerId) {
       onSelectPlayer(playerId);
-      if (mode === InteractionMode.SELECT || mode === InteractionMode.ADD_OFFENSE || mode === InteractionMode.ADD_DEFENSE || mode === InteractionMode.DRAW) {
+      if (
+        !isStartLocked &&
+        (mode === InteractionMode.SELECT ||
+          mode === InteractionMode.ADD_OFFENSE ||
+          mode === InteractionMode.ADD_DEFENSE ||
+          mode === InteractionMode.DRAW)
+      ) {
         setIsDragging(true);
         setActivePlayerId(playerId);
       }
@@ -110,7 +118,7 @@ const Field: React.FC<FieldProps> = ({
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (isAnimationActive || !isDragging || !activePlayerId) return;
+    if (isAnimationActive || isStartLocked || !isDragging || !activePlayerId) return;
     const coords = getCoordinates(e);
     if (
       coords &&
@@ -205,6 +213,7 @@ const Field: React.FC<FieldProps> = ({
 
   const w = FIELD_WIDTH * SCALE, h = FIELD_HEIGHT * SCALE, ez = ENDZONE_DEPTH * SCALE;
   const handleDrop = (clientX: number, clientY: number, payload: string) => {
+    if (isStartLocked) return;
     if (!draggingToken) return;
     const expectedPayload = `${draggingToken.team}:${draggingToken.labelNum}`;
     if (payload !== expectedPayload) return;
