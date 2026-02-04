@@ -96,6 +96,14 @@ const serializePlay = (play: Play, uid: string) => {
     force: play.force,
     description: play.description.trim(),
     players: play.players.map(serializePlayer),
+    throws: (play.throws || []).map((t) => ({
+      id: t.id,
+      throwerId: t.throwerId,
+      receiverId: t.receiverId,
+      releaseTime: t.releaseTime,
+      angle: t.angle,
+      power: t.power
+    })),
     visibility,
     sharedTeamIds: visibility === 'team' ? play.sharedTeamIds || [] : [],
     createdBy: play.createdBy || uid,
@@ -128,6 +136,14 @@ const hydratePlay = (data: Omit<Play, 'id'>, id: string): Play => ({
   ownerId: data.ownerId,
   visibility: data.visibility || 'private',
   sharedTeamIds: data.sharedTeamIds || [],
+  throws: (data.throws || []).map((t) => ({
+    id: t.id,
+    throwerId: t.throwerId,
+    receiverId: t.receiverId,
+    releaseTime: t.releaseTime,
+    angle: t.angle,
+    power: t.power
+  })),
   players: hydratePlayers(data.players || [])
 });
 

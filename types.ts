@@ -23,6 +23,17 @@ export interface Player {
   cutterDefense?: 'under' | 'deep';
 }
 
+export type ThrowPower = 'soft' | 'medium' | 'hard';
+
+export interface ThrowEvent {
+  id: string;
+  throwerId: string;
+  receiverId: string;
+  releaseTime: number;
+  angle: number; // -1 (IO) to 1 (OI)
+  power: ThrowPower;
+}
+
 export interface Play {
   id: string;
   ownerId?: string;
@@ -30,6 +41,7 @@ export interface Play {
   players: Player[];
   force: Force;
   description: string;
+  throws?: ThrowEvent[];
   visibility?: 'private' | 'team' | 'public';
   sharedTeamIds?: string[];
   createdAt?: unknown;

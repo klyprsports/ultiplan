@@ -38,6 +38,17 @@ const App: React.FC = () => {
   const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [draggingToken, setDraggingToken] = useState<{ team: 'offense' | 'defense'; labelNum: number } | null>(null);
+  const [throws, setThrows] = useState<Play['throws']>([]);
+  const [showThrowControls, setShowThrowControls] = useState(false);
+  const [throwDraft, setThrowDraft] = useState<{
+    throwerId: string;
+    receiverId: string | null;
+    releaseTime: number;
+    angle: number;
+    power: 'soft' | 'medium' | 'hard';
+  } | null>(null);
+  const [isSelectingReceiver, setIsSelectingReceiver] = useState(false);
+  const [editingThrowId, setEditingThrowId] = useState<string | null>(null);
   
   const [animationState, setAnimationState] = useState<AnimationState>('IDLE');
   const [animationTime, setAnimationTime] = useState(0);
@@ -351,7 +362,7 @@ const App: React.FC = () => {
     }
   }, [savedPlays, savedFormations, playbookLoaded]);
 
-  const maxPlayDuration = useMemo(() => {
+  const basePlayDuration = useMemo(() => {
     let maxDur = 0;
     players.forEach(player => {
       if (player.path.length === 0) return;
@@ -367,6 +378,195 @@ const App: React.FC = () => {
     });
     return maxDur + 1.5;
   }, [players]);
+
+  const getThrowSpeed = useCallback((power: 'soft' | 'medium' | 'hard') => {
+    if (power === 'soft') return 8;
+    if (power === 'hard') return 16;
+    return 12;
+  }, []);
+
+  const calculatePositionAtTime = useCallback((player: Player, time: number): Point => {
+    if (player.path.length === 0 || time <= 0) return { x: player.x, y: player.y };
+    const acc = player.acceleration;
+    const topSpeed = player.speed;
+    const dec = acc * 2.0;
+    const points = [{ x: player.x, y: player.y }, ...player.path];
+    const vertexSpeeds = [0];
+    for (let i = 1; i < points.length - 1; i++) {
+      const pPrev = points[i-1], pCurr = points[i], pNext = points[i+1];
+      const v1 = { x: pCurr.x - pPrev.x, y: pCurr.y - pPrev.y };
+      const v2 = { x: pNext.x - pCurr.x, y: pNext.y - pCurr.y };
+      const mag1 = Math.sqrt(v1.x**2 + v1.y**2), mag2 = Math.sqrt(v2.x**2 + v2.y**2);
+      if (mag1 === 0 || mag2 === 0) { vertexSpeeds.push(0); continue; }
+      const cosTheta = (v1.x * v2.x + v1.y * v2.y) / (mag1 * mag2);
+      const speedFactor = Math.max(0, (1 + cosTheta) / 2);
+      vertexSpeeds.push(topSpeed * speedFactor);
+    }
+    vertexSpeeds.push(0);
+    let tRem = time;
+    for (let i = 0; i < points.length - 1; i++) {
+      const p1 = points[i], p2 = points[i+1];
+      const dx = p2.x - p1.x, dy = p2.y - p1.y;
+      const L = Math.sqrt(dx**2 + dy**2);
+      if (L === 0) continue;
+      const v0 = vertexSpeeds[i], v1 = vertexSpeeds[i+1];
+      const d_acc_to_top = (topSpeed**2 - v0**2) / (2 * acc);
+      const d_dec_to_v1 = (topSpeed**2 - v1**2) / (2 * dec);
+      let tSegTotal, distAtTRem;
+      if (d_acc_to_top + d_dec_to_v1 <= L) {
+        const tAcc = (topSpeed - v0) / acc;
+        const tDec = (topSpeed - v1) / dec;
+        const dCruise = L - d_acc_to_top - d_dec_to_v1;
+        const tCruise = dCruise / topSpeed;
+        tSegTotal = tAcc + tCruise + tDec;
+        if (tRem <= tSegTotal) {
+          if (tRem <= tAcc) distAtTRem = v0 * tRem + 0.5 * acc * tRem**2;
+          else if (tRem <= tAcc + tCruise) distAtTRem = d_acc_to_top + topSpeed * (tRem - tAcc);
+          else {
+            const tr = tRem - tAcc - tCruise;
+            distAtTRem = (d_acc_to_top + dCruise) + (topSpeed * tr - 0.5 * dec * tr**2);
+          }
+          const ratio = distAtTRem / L;
+          return { x: p1.x + dx * ratio, y: p1.y + dy * ratio };
+        }
+      } else {
+        const vPeakSq = (2*L + v0**2/acc + v1**2/dec) / (1/acc + 1/dec);
+        const vPeak = Math.sqrt(vPeakSq);
+        const tAcc = (vPeak - v0) / acc;
+        const tDec = (vPeak - v1) / dec;
+        tSegTotal = tAcc + tDec;
+        if (tRem <= tSegTotal) {
+          if (tRem <= tAcc) distAtTRem = v0 * tRem + 0.5 * acc * tRem**2;
+          else {
+            const tr = tRem - tAcc;
+            distAtTRem = (v0 * tAcc + 0.5 * acc * tAcc**2) + (vPeak * tr - 0.5 * dec * tr**2);
+          }
+          const ratio = distAtTRem / L;
+          return { x: p1.x + dx * ratio, y: p1.y + dy * ratio };
+        }
+      }
+      tRem -= tSegTotal;
+    }
+    return points[points.length - 1];
+  }, []);
+
+  const throwPlans = useMemo(() => {
+    const discOffset = { x: 1.2, y: -1.2 };
+    const plans = (throws || []).map((t) => {
+      const thrower = players.find((p) => p.id === t.throwerId);
+      const receiver = players.find((p) => p.id === t.receiverId);
+      if (!thrower || !receiver) return null;
+      const throwerAtRelease = calculatePositionAtTime(thrower, t.releaseTime);
+      const start = { x: throwerAtRelease.x + discOffset.x, y: throwerAtRelease.y + discOffset.y };
+      const receiverAtRelease = calculatePositionAtTime(receiver, t.releaseTime);
+      const speed = getThrowSpeed(t.power);
+      const dx = receiverAtRelease.x - start.x;
+      const dy = receiverAtRelease.y - start.y;
+      const dist = Math.hypot(dx, dy);
+      const minTravel = 0.5;
+      const dirX = dist > 0 ? dx / dist : 0;
+      const dirY = dist > 0 ? dy / dist : 1;
+      const travelDist = Math.max(minTravel, dist);
+      const duration = Math.max(0.2, travelDist / speed);
+      const end = dist < minTravel
+        ? { x: start.x + dirX * minTravel, y: start.y + dirY * minTravel }
+        : calculatePositionAtTime(receiver, t.releaseTime + duration);
+      return {
+        ...t,
+        start,
+        end,
+        duration,
+        endTime: t.releaseTime + duration
+      };
+    }).filter((plan): plan is NonNullable<typeof plan> => Boolean(plan));
+    return plans.sort((a, b) => a.releaseTime - b.releaseTime);
+  }, [throws, players, calculatePositionAtTime, getThrowSpeed]);
+
+  const getDiscPosition = useCallback((plan: {
+    start: Point;
+    end: Point;
+    releaseTime: number;
+    duration: number;
+    angle: number;
+  }, time: number) => {
+    const t = Math.min(1, Math.max(0, (time - plan.releaseTime) / plan.duration));
+    const dx = plan.end.x - plan.start.x;
+    const dy = plan.end.y - plan.start.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const px = -uy;
+    const py = ux;
+    const curve = plan.angle * dist * 0.15 * Math.sin(Math.PI * t);
+    return {
+      x: plan.start.x + dx * t + px * curve,
+      y: plan.start.y + dy * t + py * curve
+    };
+  }, []);
+
+  const throwOutcomes = useMemo(() => {
+    return throwPlans.map((plan) => ({
+      id: plan.id,
+      catchTime: plan.endTime,
+      catchPlayerId: plan.receiverId
+    }));
+  }, [throwPlans]);
+
+  const maxPlayDuration = useMemo(() => {
+    const maxThrowEnd = throwPlans.reduce((acc, plan) => Math.max(acc, plan.endTime), 0);
+    return Math.max(basePlayDuration, maxThrowEnd);
+  }, [basePlayDuration, throwPlans]);
+
+  const throwOutcomeMap = useMemo(() => {
+    const map = new Map<string, { catchTime: number | null; catchPlayerId: string | null }>();
+    throwOutcomes.forEach((o) => map.set(o.id, o));
+    return map;
+  }, [throwOutcomes]);
+
+  const getDiscStateAtTime = useCallback((time: number) => {
+    const offense = players.filter((p) => p.team === 'offense');
+    const initialHolderId = offense.find((p) => p.hasDisc)?.id ?? offense[0]?.id ?? null;
+    let holderId: string | null = initialHolderId;
+    let flight: { x: number; y: number; rotation: number } | null = null;
+    let path: Point[] | null = null;
+    let turnoverTime: number | null = null;
+    for (const plan of throwPlans) {
+      const outcome = throwOutcomeMap.get(plan.id);
+      const catchTime = outcome?.catchTime ?? null;
+      const catchPlayerId = outcome?.catchPlayerId ?? null;
+      const endTime = catchTime ?? plan.endTime;
+      if (time < plan.releaseTime) break;
+      if (catchTime && time >= catchTime) {
+        holderId = catchPlayerId;
+        turnoverTime = catchTime;
+        const samples = 24;
+        const points: Point[] = [];
+        for (let i = 0; i <= samples; i++) {
+          const t = plan.releaseTime + (plan.duration * i) / samples;
+          points.push(getDiscPosition(plan, t));
+        }
+        path = points;
+        break;
+      }
+      if (time >= plan.releaseTime && time < endTime) {
+        const discPos = getDiscPosition(plan, time);
+        const rotation = plan.angle < -0.2 ? -45 : plan.angle > 0.2 ? 45 : 0;
+        flight = { x: discPos.x, y: discPos.y, rotation };
+        holderId = null;
+        const samples = 24;
+        const points: Point[] = [];
+        const progress = Math.min(1, Math.max(0, (time - plan.releaseTime) / plan.duration));
+        const lastSample = Math.max(1, Math.floor(samples * progress));
+        for (let i = 0; i <= lastSample; i++) {
+          const t = plan.releaseTime + (plan.duration * i) / samples;
+          points.push(getDiscPosition(plan, t));
+        }
+        path = points;
+        break;
+      }
+    }
+    return { holderId, flight, turnoverTime, path };
+  }, [players, throwPlans, throwOutcomeMap, getDiscPosition]);
 
   const addPlayer = (team: Team, x: number, y: number) => {
     const teamPlayers = players.filter(p => p.team === team);
@@ -573,13 +773,70 @@ const App: React.FC = () => {
   const assignDisc = (id: string) => {
     setPlayers(prev => prev.map(p => ({
       ...p,
-      hasDisc: p.id === id ? !p.hasDisc : false
+      hasDisc: p.id === id
     })));
   };
 
   const removePlayer = (id: string) => {
     setPlayers(prev => prev.filter(p => p.id !== id));
     if (selectedPlayerId === id) setSelectedPlayerId(null);
+    setThrows(prev => (prev || []).filter(t => t.throwerId !== id && t.receiverId !== id));
+  };
+
+  const handleSelectPlayer = (id: string) => {
+    if (isSelectingReceiver && throwDraft) {
+      const receiver = players.find((p) => p.id === id);
+      if (receiver && receiver.team === 'offense' && receiver.id !== throwDraft.throwerId) {
+        setThrowDraft({ ...throwDraft, receiverId: receiver.id });
+        setIsSelectingReceiver(false);
+        setSelectedPlayerId(throwDraft.throwerId);
+        return;
+      }
+    }
+    setSelectedPlayerId(id);
+  };
+
+  const openThrowControls = (throwerId: string, existingThrow?: { id: string; receiverId: string; releaseTime: number; angle: number; power: 'soft' | 'medium' | 'hard' }) => {
+    setThrowDraft({
+      throwerId,
+      receiverId: existingThrow?.receiverId ?? null,
+      releaseTime: existingThrow?.releaseTime ?? 0,
+      angle: existingThrow?.angle ?? 0,
+      power: existingThrow?.power ?? 'medium'
+    });
+    setEditingThrowId(existingThrow?.id ?? null);
+    setIsSelectingReceiver(true);
+    setShowThrowControls(true);
+  };
+
+  const closeThrowControls = () => {
+    setShowThrowControls(false);
+    setIsSelectingReceiver(false);
+    setThrowDraft(null);
+    setEditingThrowId(null);
+  };
+
+  const confirmThrow = () => {
+    if (!throwDraft || !throwDraft.receiverId) return;
+    const newThrow = {
+      id: editingThrowId ?? generateId(),
+      throwerId: throwDraft.throwerId,
+      receiverId: throwDraft.receiverId,
+      releaseTime: Math.max(0, Math.min(maxPlayDuration, throwDraft.releaseTime)),
+      angle: throwDraft.angle,
+      power: throwDraft.power
+    };
+    setThrows((prev) => {
+      const base = prev || [];
+      if (editingThrowId) {
+        return base.map((t) => (t.id === editingThrowId ? newThrow : t)).sort((a, b) => a.releaseTime - b.releaseTime);
+      }
+      return [...base, newThrow].sort((a, b) => a.releaseTime - b.releaseTime);
+    });
+    setIsSelectingReceiver(false);
+    setShowThrowControls(false);
+    setThrowDraft(null);
+    setEditingThrowId(null);
   };
 
   const startAnimation = () => {
@@ -603,6 +860,11 @@ const App: React.FC = () => {
 
   const stopAnimation = () => {
     setAnimationState('IDLE');
+    if (animationRef.current) cancelAnimationFrame(animationRef.current);
+  };
+
+  const resetAnimation = () => {
+    setAnimationState('IDLE');
     setAnimationTime(0);
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
   };
@@ -612,10 +874,16 @@ const App: React.FC = () => {
     lastTickRef.current = now;
     setAnimationTime(prev => {
       const nextTime = prev + deltaTime;
+      const discState = getDiscStateAtTime(nextTime);
+      if (discState.turnoverTime && nextTime >= discState.turnoverTime) {
+        setAnimationState('IDLE');
+        if (animationRef.current) cancelAnimationFrame(animationRef.current);
+        return discState.turnoverTime;
+      }
       if (maxPlayDuration > 0 && nextTime >= maxPlayDuration + 1) {
         setAnimationState('IDLE');
         if (animationRef.current) cancelAnimationFrame(animationRef.current);
-        return 0;
+        return maxPlayDuration;
       }
       return nextTime;
     });
@@ -670,6 +938,7 @@ const App: React.FC = () => {
       players,
       force,
       description: playDescription,
+      throws: throws || [],
       visibility,
       sharedTeamIds: visibility === 'team' ? sharedTeamIds : [],
       createdBy: playCreatedBy || currentUser?.uid,
@@ -702,6 +971,7 @@ const App: React.FC = () => {
   const loadPlay = (play: Play) => {
     stopAnimation();
     setPlayers(play.players);
+    setThrows(play.throws || []);
     setPlayName(play.name);
     setForce(play.force);
     setPlayDescription(play.description || '');
@@ -755,6 +1025,7 @@ const App: React.FC = () => {
   const loadFormation = (formation: Formation) => {
     stopAnimation();
     setPlayers(formation.players);
+    setThrows([]);
     setActiveFormation('custom');
     setFormationOwnerId(formation.ownerId || getCurrentUser()?.uid || null);
     setFormationCreatedBy(formation.createdBy || null);
@@ -800,12 +1071,12 @@ const App: React.FC = () => {
 
   const hasUnsavedPlay = useMemo(() => {
     if (players.length === 0) return false;
-    const current = normalizePlay({ name: playName, force, description: playDescription, players });
+    const current = normalizePlay({ name: playName, force, description: playDescription, players, throws: throws || [] });
     return !savedPlays.some(p => {
-      const saved = normalizePlay({ name: p.name, force: p.force, description: p.description || '', players: p.players });
+      const saved = normalizePlay({ name: p.name, force: p.force, description: p.description || '', players: p.players, throws: p.throws || [] });
       return JSON.stringify(saved) === JSON.stringify(current);
     });
-  }, [players, playName, force, playDescription, savedPlays]);
+  }, [players, playName, force, playDescription, savedPlays, throws]);
 
   const formationSaveReason = hasUnsavedFormation ? '' : 'No changes from an existing or preset formation.';
   const playSaveReason = !players.some(p => p.team === 'offense')
@@ -822,6 +1093,7 @@ const App: React.FC = () => {
       const defenseOnly = prev.filter(p => p.team !== 'offense');
       return [...defenseOnly, ...offensePlayers];
     });
+    setThrows([]);
     setSelectedPlayerId(offensePlayers[0]?.id ?? null);
     setActiveFormation(formation);
   };
@@ -854,6 +1126,15 @@ const App: React.FC = () => {
     });
   }, [force, computeDefenderPosition]);
 
+  const discState = useMemo(() => {
+    if (!isAnimationActive && animationTime === 0) {
+      const offense = players.filter((p) => p.team === 'offense');
+      const holderId = offense.find((p) => p.hasDisc)?.id ?? offense[0]?.id ?? null;
+      return { holderId, flight: null as { x: number; y: number; rotation: number } | null, turnoverTime: null as number | null, path: null as Point[] | null };
+    }
+    return getDiscStateAtTime(animationTime);
+  }, [isAnimationActive, players, animationTime, getDiscStateAtTime]);
+
   return (
     <div className="flex flex-col h-screen bg-slate-950 text-slate-100 font-sans overflow-hidden">
       {/* New Play Modal */}
@@ -875,6 +1156,7 @@ const App: React.FC = () => {
               <button onClick={() => {
                 const currentUser = getCurrentUser();
                 setPlayers([]);
+                setThrows([]);
                 setPlayName(tempPlayName || 'New Play');
                 setEditingPlayId(null);
                 setPlayDescription('');
@@ -1017,6 +1299,7 @@ const App: React.FC = () => {
         copyStatus={shareStatus}
       />
 
+
       <OnboardingIntroModal
         isOpen={showOnboardingIntro}
         onStart={startTour}
@@ -1115,8 +1398,9 @@ const App: React.FC = () => {
               onFieldClick={handleFieldClick}
               onUpdatePlayer={updatePlayerPosition}
               onAddPathPoint={addPathPoint}
-              onSelectPlayer={setSelectedPlayerId}
-              animationTime={isAnimationActive ? animationTime : null}
+              onSelectPlayer={handleSelectPlayer}
+              animationTime={animationTime}
+              isAnimationActive={isAnimationActive}
               force={force}
               onDropOffense={addOffensePlayerWithLabel}
               onDropDefense={addDefensePlayerWithLabel}
@@ -1124,6 +1408,10 @@ const App: React.FC = () => {
                 if (success) setDraggingToken(null);
               }}
               draggingToken={draggingToken}
+              discFlight={discState.flight}
+              discHolderId={discState.holderId}
+              highlightPlayerId={throwDraft?.receiverId ?? null}
+              discPath={discState.path}
               onDebugEvent={() => {}}
             />
           </div>
@@ -1131,11 +1419,52 @@ const App: React.FC = () => {
 
         <Sidebar 
           players={players} 
+          throws={throws || []}
           selectedPlayerId={selectedPlayerId} 
           onDeletePlayer={removePlayer} 
           onClearPath={clearPath} 
           onUndoPathPoint={undoLastPathPoint} 
           onAssignDisc={assignDisc} 
+          throwControls={{
+            isOpen: showThrowControls,
+            isSelectingReceiver,
+            throwDraft,
+            maxReleaseTime: maxPlayDuration,
+            isEditing: Boolean(editingThrowId),
+            onToggle: (isOpen: boolean) => {
+              if (isOpen && selectedPlayerId) {
+                const existing = (throws || []).find((t) => t.throwerId === selectedPlayerId);
+                openThrowControls(selectedPlayerId, existing || undefined);
+              } else {
+                closeThrowControls();
+              }
+            },
+            onEdit: (throwId: string) => {
+              const existing = (throws || []).find((t) => t.id === throwId);
+              if (existing) {
+                openThrowControls(existing.throwerId, existing);
+              }
+            },
+            onSelectReceiver: () => setIsSelectingReceiver(true),
+            onClearReceiver: () => {
+              if (!throwDraft) return;
+              setThrowDraft({ ...throwDraft, receiverId: null });
+            },
+            onReleaseTimeChange: (value: number) => {
+              if (!throwDraft) return;
+              setThrowDraft({ ...throwDraft, releaseTime: value });
+            },
+            onAngleChange: (value: number) => {
+              if (!throwDraft) return;
+              setThrowDraft({ ...throwDraft, angle: value });
+            },
+            onPowerChange: (value: 'soft' | 'medium' | 'hard') => {
+              if (!throwDraft) return;
+              setThrowDraft({ ...throwDraft, power: value });
+            },
+            onConfirm: confirmThrow,
+            onCancel: closeThrowControls
+          }}
           onUpdateSpeed={updatePlayerSpeed} 
           onUpdateAcceleration={updatePlayerAcceleration} 
           onUpdateRole={updatePlayerRole}
@@ -1146,6 +1475,7 @@ const App: React.FC = () => {
           onStartAnimation={startAnimation}
           onTogglePause={togglePause}
           onStopAnimation={stopAnimation}
+          onResetAnimation={resetAnimation}
           hasPlayers={players.length > 0}
           description={playDescription}
           onUpdateDescription={setPlayDescription}

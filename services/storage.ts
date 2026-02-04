@@ -142,11 +142,22 @@ export const normalizePlay = (play: {
   players: Player[];
   visibility?: 'private' | 'team' | 'public';
   sharedTeamIds?: string[];
+  throws?: { id: string; throwerId: string; receiverId: string; releaseTime: number; angle: number; power: string }[];
 }) => ({
   name: play.name.trim(),
   force: play.force,
   description: play.description.trim(),
   players: normalizePlayPlayers(play.players),
   visibility: play.visibility ?? 'private',
-  sharedTeamIds: [...(play.sharedTeamIds ?? [])].sort()
+  sharedTeamIds: [...(play.sharedTeamIds ?? [])].sort(),
+  throws: [...(play.throws ?? [])]
+    .map((t) => ({
+      id: t.id,
+      throwerId: t.throwerId,
+      receiverId: t.receiverId,
+      releaseTime: t.releaseTime,
+      angle: t.angle,
+      power: t.power
+    }))
+    .sort((a, b) => a.releaseTime - b.releaseTime)
 });

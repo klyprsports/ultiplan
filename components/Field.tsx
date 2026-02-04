@@ -11,11 +11,16 @@ interface FieldProps {
   onAddPathPoint: (id: string, point: Point) => void;
   onSelectPlayer: (id: string) => void;
   animationTime: number | null;
+  isAnimationActive: boolean;
   force: Force;
   onDropOffense: (labelNum: number, x: number, y: number) => boolean;
   onDropDefense: (labelNum: number, x: number, y: number) => boolean;
   onDropResult: (success: boolean) => void;
   draggingToken: { team: 'offense' | 'defense'; labelNum: number } | null;
+  discFlight?: { x: number; y: number; rotation: number } | null;
+  discHolderId?: string | null;
+  highlightPlayerId?: string | null;
+  discPath?: Point[] | null;
 }
 
 const FIELD_WIDTH = 40; // yards
@@ -33,11 +38,16 @@ const Field: React.FC<FieldProps> = ({
   onAddPathPoint,
   onSelectPlayer,
   animationTime,
+  isAnimationActive,
   force,
   onDropOffense,
   onDropDefense,
   onDropResult,
-  draggingToken
+  draggingToken,
+  discFlight,
+  discHolderId,
+  highlightPlayerId,
+  discPath
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -83,7 +93,7 @@ const Field: React.FC<FieldProps> = ({
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (animationTime !== null) return;
+    if (isAnimationActive) return;
     const coords = getCoordinates(e);
     if (!coords) return;
     const target = e.target as SVGElement;
@@ -100,7 +110,7 @@ const Field: React.FC<FieldProps> = ({
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
-    if (animationTime !== null || !isDragging || !activePlayerId) return;
+    if (isAnimationActive || !isDragging || !activePlayerId) return;
     const coords = getCoordinates(e);
     if (
       coords &&
@@ -214,16 +224,16 @@ const Field: React.FC<FieldProps> = ({
 
   return (
     <div
-      className={`flex items-center gap-6 select-none ${animationTime !== null ? 'pointer-events-none' : ''}`}
+      className={`flex items-center gap-6 select-none ${isAnimationActive ? 'pointer-events-none' : ''}`}
       onDragOver={(e) => {
-        if (animationTime !== null) return;
+        if (isAnimationActive) return;
         const types = Array.from(e.dataTransfer.types || []);
         if (!types.includes('application/x-ultiplan-player')) return;
         e.preventDefault();
         e.dataTransfer.dropEffect = 'copy';
       }}
       onDrop={(e) => {
-        if (animationTime !== null) return;
+        if (isAnimationActive) return;
         const types = Array.from(e.dataTransfer.types || []);
         if (!types.includes('application/x-ultiplan-player')) return;
         if (!draggingToken) return;
@@ -254,14 +264,14 @@ const Field: React.FC<FieldProps> = ({
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
             onDragOver={(e) => {
-              if (animationTime !== null) return;
+              if (isAnimationActive) return;
               const types = Array.from(e.dataTransfer.types || []);
               if (!types.includes('application/x-ultiplan-player')) return;
               e.preventDefault();
               e.dataTransfer.dropEffect = 'copy';
             }}
             onDrop={(e) => {
-              if (animationTime !== null) return;
+              if (isAnimationActive) return;
               const types = Array.from(e.dataTransfer.types || []);
               if (!types.includes('application/x-ultiplan-player')) return;
               if (!draggingToken) return;
@@ -328,14 +338,34 @@ const Field: React.FC<FieldProps> = ({
             })}
             {players.map(player => {
               const pos = getAnimatedPosition(player);
+              const isHighlighted = highlightPlayerId === player.id;
               return (
                 <g key={player.id} data-player-id={player.id} transform={`translate(${pos.x * SCALE}, ${pos.y * SCALE})`} className="cursor-pointer group" draggable={false}>
-                  <circle cx="0" cy="0" r={1.2 * SCALE} fill={player.team === 'offense' ? '#2563eb' : '#dc2626'} stroke={selectedPlayerId === player.id && !animationTime ? 'white' : 'rgba(255,255,255,0.2)'} strokeWidth={selectedPlayerId === player.id && !animationTime ? "3" : "1"} />
-                  {player.hasDisc && <g transform={`translate(${1.2 * SCALE}, ${-1.2 * SCALE})`}><circle r={0.6 * SCALE} fill="#f8fafc" stroke="#94a3b8" strokeWidth="1" /></g>}
+                  <circle cx="0" cy="0" r={1.2 * SCALE} fill={player.team === 'offense' ? '#2563eb' : '#dc2626'} stroke={selectedPlayerId === player.id && !animationTime ? 'white' : isHighlighted ? '#34d399' : 'rgba(255,255,255,0.2)'} strokeWidth={selectedPlayerId === player.id && !animationTime ? "3" : isHighlighted ? "3" : "1"} />
+                  {(discHolderId ? discHolderId === player.id : player.hasDisc) && !discFlight && (
+                    <g transform={`translate(${1.2 * SCALE}, ${-1.2 * SCALE})`}>
+                      <circle r={0.6 * SCALE} fill="#f8fafc" stroke="#94a3b8" strokeWidth="1" />
+                    </g>
+                  )}
                   <text x="0" y="1" textAnchor="middle" fill="white" fontSize={0.8 * SCALE} fontWeight="bold" pointerEvents="none" className="font-mono">{player.label}</text>
                 </g>
               );
             })}
+            {discFlight && (
+              <g transform={`translate(${discFlight.x * SCALE}, ${discFlight.y * SCALE})`}>
+                <ellipse transform={`rotate(${discFlight.rotation})`} rx={0.8 * SCALE} ry={0.35 * SCALE} fill="#f8fafc" stroke="#94a3b8" strokeWidth="1" />
+              </g>
+            )}
+            {discPath && discPath.length > 1 && (
+              <polyline
+                points={discPath.map((p) => `${p.x * SCALE},${p.y * SCALE}`).join(' ')}
+                fill="none"
+                stroke="#facc15"
+                strokeWidth="2"
+                strokeDasharray="6 6"
+                opacity="0.8"
+              />
+            )}
           </svg>
         </div>
       </div>
