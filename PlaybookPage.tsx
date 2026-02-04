@@ -113,6 +113,8 @@ const PlaybookPage: React.FC = () => {
   const [sharingTarget, setSharingTarget] = useState<{ type: 'play' | 'formation'; item: Play | Formation } | null>(null);
   const [sharingVisibility, setSharingVisibility] = useState<'private' | 'team' | 'public'>('private');
   const [sharingTeamIds, setSharingTeamIds] = useState<string[]>([]);
+  const [copyTarget, setCopyTarget] = useState<{ type: 'play' | 'formation'; item: Play | Formation } | null>(null);
+  const [copyName, setCopyName] = useState('');
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
@@ -342,7 +344,7 @@ const PlaybookPage: React.FC = () => {
     setSharingTarget(null);
   };
 
-  const clonePlay = async (play: Play) => {
+  const clonePlay = async (play: Play, nameOverride?: string) => {
     try {
       await ensureSignedInForWrite();
       const currentUser = getCurrentUser();
@@ -356,7 +358,7 @@ const PlaybookPage: React.FC = () => {
         createdBy: currentUser.uid,
         lastEditedBy: currentUser.uid,
         sourcePlayId: play.id,
-        name: `${play.name} (Copy)`
+        name: nameOverride?.trim() || `${play.name} (Copy)`
       };
       setSavedPlays((prev) => [newPlay, ...prev]);
       if (isFirestoreEnabled()) {
@@ -367,7 +369,7 @@ const PlaybookPage: React.FC = () => {
     }
   };
 
-  const cloneFormation = async (formation: Formation) => {
+  const cloneFormation = async (formation: Formation, nameOverride?: string) => {
     try {
       await ensureSignedInForWrite();
       const currentUser = getCurrentUser();
@@ -381,7 +383,7 @@ const PlaybookPage: React.FC = () => {
         createdBy: currentUser.uid,
         lastEditedBy: currentUser.uid,
         sourceFormationId: formation.id,
-        name: `${formation.name} (Copy)`
+        name: nameOverride?.trim() || `${formation.name} (Copy)`
       };
       setSavedFormations((prev) => [newFormation, ...prev]);
       if (isFirestoreEnabled()) {
@@ -471,11 +473,11 @@ const PlaybookPage: React.FC = () => {
             ) : (
               <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {savedPlays.map((play) => (
-                  <div key={play.id} className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg max-w-[220px] w-full mx-auto">
+                  <div key={play.id} className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg max-w-[220px] w-full mx-auto overflow-hidden">
                     <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-lg font-bold text-slate-100">{play.name}</h3>
-                        <div className="text-[10px] uppercase tracking-[0.24em] text-slate-400 font-bold mt-1 w-full whitespace-nowrap">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-lg font-bold text-slate-100 truncate">{play.name}</h3>
+                        <div className="text-[10px] uppercase tracking-[0.24em] text-slate-400 font-bold mt-1 w-full truncate">
                           {play.players.length} Players - {play.force} Force
                         </div>
                         <div className="mt-2 flex flex-wrap gap-2 text-[9px] uppercase tracking-widest">
@@ -485,7 +487,7 @@ const PlaybookPage: React.FC = () => {
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 shrink-0">
                         {play.ownerId === user?.uid && (
                           <button
                             onClick={() => openSharing({ type: 'play', item: play })}
@@ -506,22 +508,22 @@ const PlaybookPage: React.FC = () => {
                         )}
                       </div>
                     </div>
-                    <div className={`grid gap-2 ${play.ownerId === user?.uid ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                    <div className="grid grid-cols-2 gap-2">
                       <button
                         onClick={() => openPlay(play.id)}
                         className="w-full py-2 rounded-xl bg-emerald-500 text-emerald-950 font-bold uppercase tracking-widest text-xs hover:bg-emerald-400 transition-colors"
                       >
                         Open
                       </button>
-                      {play.ownerId !== user?.uid && (
-                        <button
-                          onClick={() => clonePlay(play)}
-                          className="w-full py-2 rounded-xl bg-slate-800 text-slate-200 font-bold uppercase tracking-widest text-xs hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
-                        >
-                          <Copy size={14} />
-                          Clone
-                        </button>
-                      )}
+                      <button
+                        onClick={() => {
+                          setCopyTarget({ type: 'play', item: play });
+                          setCopyName(`${play.name} (Copy)`);
+                        }}
+                        className="w-full py-2 rounded-xl bg-slate-800 text-slate-200 font-bold uppercase tracking-widest text-xs hover:bg-slate-700 transition-colors flex items-center justify-center"
+                      >
+                        Make a Copy
+                      </button>
                     </div>
                     <div className="mt-2 w-full max-w-[180px] aspect-[4/11] rounded-lg overflow-hidden bg-slate-950/40 border border-slate-800/80 self-center">
                       <MiniField players={play.players} showPaths />
@@ -540,11 +542,11 @@ const PlaybookPage: React.FC = () => {
             ) : (
               <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {savedFormations.map((formation) => (
-                  <div key={formation.id} className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg max-w-[220px] w-full mx-auto">
+                  <div key={formation.id} className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg max-w-[220px] w-full mx-auto overflow-hidden">
                     <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h3 className="text-lg font-bold text-slate-100">{formation.name}</h3>
-                        <div className="text-[10px] uppercase tracking-[0.24em] text-slate-400 font-bold mt-1 w-full whitespace-nowrap">
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-lg font-bold text-slate-100 truncate">{formation.name}</h3>
+                        <div className="text-[10px] uppercase tracking-[0.24em] text-slate-400 font-bold mt-1 w-full truncate">
                           {formation.players.filter((p) => p.team === 'offense').length} O - {formation.players.filter((p) => p.team === 'defense').length} D
                         </div>
                         <div className="mt-2 flex flex-wrap gap-2 text-[9px] uppercase tracking-widest">
@@ -554,7 +556,7 @@ const PlaybookPage: React.FC = () => {
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 shrink-0">
                         {formation.ownerId === user?.uid && (
                           <button
                             onClick={() => openSharing({ type: 'formation', item: formation })}
@@ -583,11 +585,13 @@ const PlaybookPage: React.FC = () => {
                         Open
                       </button>
                       <button
-                        onClick={() => cloneFormation(formation)}
-                        className="w-full py-2 rounded-xl bg-slate-800 text-slate-200 font-bold uppercase tracking-widest text-xs hover:bg-slate-700 transition-colors flex items-center justify-center gap-2"
+                        onClick={() => {
+                          setCopyTarget({ type: 'formation', item: formation });
+                          setCopyName(`${formation.name} (Copy)`);
+                        }}
+                        className="w-full py-2 rounded-xl bg-slate-800 text-slate-200 font-bold uppercase tracking-widest text-xs hover:bg-slate-700 transition-colors flex items-center justify-center"
                       >
-                        <Copy size={14} />
-                        Clone
+                        Make a Copy
                         </button>
                     </div>
                     <div className="mt-2 w-full max-w-[180px] aspect-[4/11] rounded-lg overflow-hidden bg-slate-950/40 border border-slate-800/80 self-center">
@@ -627,6 +631,48 @@ const PlaybookPage: React.FC = () => {
           isOpen={showAuthModal}
           onClose={() => setShowAuthModal(false)}
         />
+
+        {copyTarget && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/50">
+                <h2 className="text-base font-bold">Make a Copy</h2>
+                <button onClick={() => setCopyTarget(null)} className="text-slate-500 hover:text-white transition-colors">X</button>
+              </div>
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">New name</label>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={copyName}
+                    onChange={(e) => setCopyName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                    placeholder="Copy name"
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <button onClick={() => setCopyTarget(null)} className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all">Cancel</button>
+                  <button
+                    onClick={async () => {
+                      if (!copyTarget) return;
+                      if (copyTarget.type === 'play') {
+                        await clonePlay(copyTarget.item as Play, copyName);
+                      } else {
+                        await cloneFormation(copyTarget.item as Formation, copyName);
+                      }
+                      setCopyTarget(null);
+                      setCopyName('');
+                    }}
+                    className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition-all"
+                  >
+                    Create Copy
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {showTeamModal && (
           <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">

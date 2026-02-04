@@ -320,123 +320,125 @@ const Sidebar: React.FC<SidebarProps> = ({
             <div className="grid grid-cols-1 gap-2 mt-4">
               {selectedPlayer.team === 'offense' && (
                 <>
-                  {!selectedPlayer.hasDisc && (
-                    <button onClick={() => onAssignDisc(selectedPlayer.id)} disabled={isPlaying} className="flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors border bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600"><Disc size={14} /> Give Disc</button>
-                  )}
-                  {selectedPlayer.hasDisc && !throws.some((t) => t.throwerId === selectedPlayer.id) && (
-                    <button
-                      onClick={() => {
-                        throwControls.onToggle(true);
-                      }}
-                      disabled={isPlaying}
-                      className="flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors bg-indigo-600 text-white border border-indigo-500 hover:bg-indigo-500"
-                    >
-                      <Disc size={14} /> Throw Disc
-                    </button>
-                  )}
-                  {selectedPlayer.hasDisc && throwControls.isOpen && (
-                    <div className="mt-2 rounded-lg border border-slate-700 bg-slate-900/60 p-3 space-y-3">
-                      <div className="text-[10px] uppercase tracking-widest text-slate-500">Receiver</div>
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-xs text-slate-200">
-                          {throwControls.throwDraft?.receiverId
-                            ? `Receiver set: ${players.find((p) => p.id === throwControls.throwDraft?.receiverId)?.label ?? ''}`
-                            : throwControls.isSelectingReceiver
-                              ? 'Click a receiver on the field...'
-                              : 'No receiver selected'}
-                        </div>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={throwControls.onSelectReceiver}
-                            className="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest bg-slate-800 text-slate-200 hover:bg-slate-700"
-                          >
-                            {throwControls.throwDraft?.receiverId ? 'Change' : 'Select'}
-                          </button>
-                          {throwControls.throwDraft?.receiverId && (
+                  <div data-tour-id="throw-controls" className="space-y-2">
+                    {!selectedPlayer.hasDisc && (
+                      <button onClick={() => onAssignDisc(selectedPlayer.id)} disabled={isPlaying} className="flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors border bg-slate-700 border-slate-600 text-slate-300 hover:bg-slate-600"><Disc size={14} /> Give Disc</button>
+                    )}
+                    {selectedPlayer.hasDisc && !throws.some((t) => t.throwerId === selectedPlayer.id) && (
+                      <button
+                        onClick={() => {
+                          throwControls.onToggle(true);
+                        }}
+                        disabled={isPlaying}
+                        className="flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors bg-indigo-600 text-white border border-indigo-500 hover:bg-indigo-500"
+                      >
+                        <Disc size={14} /> Throw Disc
+                      </button>
+                    )}
+                    {selectedPlayer.hasDisc && throwControls.isOpen && (
+                      <div className="mt-2 rounded-lg border border-slate-700 bg-slate-900/60 p-3 space-y-3">
+                        <div className="text-[10px] uppercase tracking-widest text-slate-500">Receiver</div>
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="text-xs text-slate-200">
+                            {throwControls.throwDraft?.receiverId
+                              ? `Receiver set: ${players.find((p) => p.id === throwControls.throwDraft?.receiverId)?.label ?? ''}`
+                              : throwControls.isSelectingReceiver
+                                ? 'Click a receiver on the field...'
+                                : 'No receiver selected'}
+                          </div>
+                          <div className="flex gap-2">
                             <button
-                              onClick={throwControls.onClearReceiver}
+                              onClick={throwControls.onSelectReceiver}
                               className="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest bg-slate-800 text-slate-200 hover:bg-slate-700"
                             >
-                              Clear
+                              {throwControls.throwDraft?.receiverId ? 'Change' : 'Select'}
                             </button>
-                          )}
+                            {throwControls.throwDraft?.receiverId && (
+                              <button
+                                onClick={throwControls.onClearReceiver}
+                                className="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest bg-slate-800 text-slate-200 hover:bg-slate-700"
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
                         </div>
-                      </div>
 
-                      <div>
-                        <div className="text-[10px] uppercase tracking-widest text-slate-500">Release Time</div>
-                        <div className="mt-1 flex items-center gap-2">
+                        <div>
+                          <div className="text-[10px] uppercase tracking-widest text-slate-500">Release Time</div>
+                          <div className="mt-1 flex items-center gap-2">
+                            <input
+                              type="range"
+                              min={0}
+                              max={Math.max(0, throwControls.maxReleaseTime)}
+                              step={0.1}
+                              value={throwControls.throwDraft?.releaseTime ?? 0}
+                              onChange={(e) => throwControls.onReleaseTimeChange(parseFloat(e.target.value))}
+                              className="w-full accent-emerald-400"
+                            />
+                            <div className="text-[10px] text-slate-200 font-mono w-10 text-right">
+                              {(throwControls.throwDraft?.releaseTime ?? 0).toFixed(1)}s
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-[10px] uppercase tracking-widest text-slate-500">Throw Angle</div>
+                          <input
+                            type="range"
+                            min={-1}
+                            max={1}
+                            step={0.1}
+                            value={throwControls.throwDraft?.angle ?? 0}
+                            onChange={(e) => throwControls.onAngleChange(parseFloat(e.target.value))}
+                            className="mt-1 w-full accent-emerald-400"
+                          />
+                          <div className="mt-1 flex justify-between text-[9px] uppercase tracking-widest text-slate-500">
+                            <span>IO</span>
+                            <span>Flat</span>
+                            <span>OI</span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-[10px] uppercase tracking-widest text-slate-500">Power</div>
                           <input
                             type="range"
                             min={0}
-                            max={Math.max(0, throwControls.maxReleaseTime)}
-                            step={0.1}
-                            value={throwControls.throwDraft?.releaseTime ?? 0}
-                            onChange={(e) => throwControls.onReleaseTimeChange(parseFloat(e.target.value))}
-                            className="w-full accent-emerald-400"
+                            max={2}
+                            step={1}
+                            value={throwControls.throwDraft?.power === 'soft' ? 0 : throwControls.throwDraft?.power === 'medium' ? 1 : 2}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              throwControls.onPowerChange(val === 0 ? 'soft' : val === 1 ? 'medium' : 'hard');
+                            }}
+                            className="mt-1 w-full accent-emerald-400"
                           />
-                          <div className="text-[10px] text-slate-200 font-mono w-10 text-right">
-                            {(throwControls.throwDraft?.releaseTime ?? 0).toFixed(1)}s
+                          <div className="mt-1 flex justify-between text-[9px] uppercase tracking-widest text-slate-500">
+                            <span>Soft</span>
+                            <span>Medium</span>
+                            <span>Hard</span>
                           </div>
                         </div>
-                      </div>
 
-                      <div>
-                        <div className="text-[10px] uppercase tracking-widest text-slate-500">Throw Angle</div>
-                        <input
-                          type="range"
-                          min={-1}
-                          max={1}
-                          step={0.1}
-                          value={throwControls.throwDraft?.angle ?? 0}
-                          onChange={(e) => throwControls.onAngleChange(parseFloat(e.target.value))}
-                          className="mt-1 w-full accent-emerald-400"
-                        />
-                        <div className="mt-1 flex justify-between text-[9px] uppercase tracking-widest text-slate-500">
-                          <span>IO</span>
-                          <span>Flat</span>
-                          <span>OI</span>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={throwControls.onCancel}
+                            className="flex-1 px-2 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-slate-800 text-slate-300 hover:bg-slate-700"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            onClick={throwControls.onConfirm}
+                            disabled={!throwControls.throwDraft?.receiverId}
+                            className="flex-1 px-2 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-emerald-500 text-emerald-950 hover:bg-emerald-400 disabled:opacity-50"
+                          >
+                            {throwControls.isEditing ? 'Save Throw' : 'Add Throw'}
+                          </button>
                         </div>
                       </div>
-
-                      <div>
-                        <div className="text-[10px] uppercase tracking-widest text-slate-500">Power</div>
-                        <input
-                          type="range"
-                          min={0}
-                          max={2}
-                          step={1}
-                          value={throwControls.throwDraft?.power === 'soft' ? 0 : throwControls.throwDraft?.power === 'medium' ? 1 : 2}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value, 10);
-                            throwControls.onPowerChange(val === 0 ? 'soft' : val === 1 ? 'medium' : 'hard');
-                          }}
-                          className="mt-1 w-full accent-emerald-400"
-                        />
-                        <div className="mt-1 flex justify-between text-[9px] uppercase tracking-widest text-slate-500">
-                          <span>Soft</span>
-                          <span>Medium</span>
-                          <span>Hard</span>
-                        </div>
-                      </div>
-
-                      <div className="flex gap-2">
-                        <button
-                          onClick={throwControls.onCancel}
-                          className="flex-1 px-2 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-slate-800 text-slate-300 hover:bg-slate-700"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          onClick={throwControls.onConfirm}
-                          disabled={!throwControls.throwDraft?.receiverId}
-                          className="flex-1 px-2 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-emerald-500 text-emerald-950 hover:bg-emerald-400 disabled:opacity-50"
-                        >
-                          {throwControls.isEditing ? 'Save Throw' : 'Add Throw'}
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                   <div className="flex gap-2">
                     <button onClick={() => onUndoPathPoint(selectedPlayer.id)} disabled={selectedPlayer.path.length === 0 || isPlaying} className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors bg-slate-700 border border-slate-600 text-slate-300 hover:bg-slate-600"><Undo2 size={14} /> Undo</button>
                     <button onClick={() => onClearPath(selectedPlayer.id)} disabled={selectedPlayer.path.length === 0 || isPlaying} className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors bg-slate-700 border border-slate-600 text-slate-300 hover:bg-slate-600"><Eraser size={14} /> Clear</button>

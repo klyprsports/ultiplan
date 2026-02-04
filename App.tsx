@@ -258,6 +258,12 @@ const App: React.FC = () => {
       target: '[data-tour-id="workflow-draw"]'
     },
     {
+      id: 'add-throws',
+      title: 'Add throws',
+      body: 'Give a handler the disc, then set a receiver, release time, angle, and power.',
+      target: '[data-tour-id="throw-controls"]'
+    },
+    {
       id: 'tactical-notes',
       title: 'Tactical notes',
       body: 'Add notes so teammates understand timing and intent.',
