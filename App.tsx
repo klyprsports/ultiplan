@@ -499,25 +499,33 @@ const App: React.FC = () => {
 
   const computeDefenderPosition = useCallback((op: Player, discHolder: Player | undefined, currentForce: Force, defender?: Player) => {
     const role = op.role ?? 'cutter';
+    const clampToTwoPointFiveYards = (x: number, y: number) => {
+      const dx = x - op.x;
+      const dy = y - op.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= 2.5 || dist === 0) return { x, y };
+      const scale = 2.5 / dist;
+      return { x: op.x + dx * scale, y: op.y + dy * scale };
+    };
     if (discHolder && op.id === discHolder.id) {
-      return {
-        x: op.x + getBreakXOffset(op, 2, currentForce),
-        y: op.y - 2
-      };
+      return clampToTwoPointFiveYards(
+        op.x + getBreakXOffset(op, 2, currentForce),
+        op.y - 2
+      );
     }
     if (role === 'handler' && discHolder) {
       const dx = discHolder.x - op.x;
       const dy = discHolder.y - op.y;
-      return {
-        x: op.x + dx * 0.25,
-        y: op.y + dy * 0.25 - 3
-      };
+      return clampToTwoPointFiveYards(
+        op.x + dx * 0.25,
+        op.y + dy * 0.25 - 3
+      );
     }
     const cutterDepth = defender?.cutterDefense === 'deep' ? -3 : 3;
-    return {
-      x: op.x + getForceXOffset(op, currentForce),
-      y: op.y + cutterDepth
-    };
+    return clampToTwoPointFiveYards(
+      op.x + getForceXOffset(op, currentForce),
+      op.y + cutterDepth
+    );
   }, [getBreakXOffset, getForceXOffset]);
 
   const autoAssignDefense = () => {
