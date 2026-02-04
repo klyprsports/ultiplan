@@ -1,4 +1,4 @@
-import { GoogleAuthProvider, User, deleteUser, linkWithPopup, onAuthStateChanged, signInAnonymously, signInWithPopup, signOut } from 'firebase/auth';
+import { GoogleAuthProvider, User, deleteUser, linkWithCredential, linkWithPopup, onAuthStateChanged, signInAnonymously, signInWithPopup, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, EmailAuthProvider, sendPasswordResetEmail } from 'firebase/auth';
 import { auth, isFirebaseConfigured } from './firebase';
 
 let authReadyPromise: Promise<void> | null = null;
@@ -48,6 +48,33 @@ export const signInWithGoogle = async () => {
     return;
   }
   await signInWithPopup(auth, provider);
+};
+
+export const signInWithEmailPassword = async (email: string, password: string) => {
+  if (!auth || !isFirebaseConfigured) return;
+  localStorage.removeItem(DISABLE_ANON_KEY);
+  if (auth.currentUser?.isAnonymous) {
+    const credential = EmailAuthProvider.credential(email, password);
+    await linkWithCredential(auth.currentUser, credential);
+    return;
+  }
+  await signInWithEmailAndPassword(auth, email, password);
+};
+
+export const signUpWithEmailPassword = async (email: string, password: string) => {
+  if (!auth || !isFirebaseConfigured) return;
+  localStorage.removeItem(DISABLE_ANON_KEY);
+  if (auth.currentUser?.isAnonymous) {
+    const credential = EmailAuthProvider.credential(email, password);
+    await linkWithCredential(auth.currentUser, credential);
+    return;
+  }
+  await createUserWithEmailAndPassword(auth, email, password);
+};
+
+export const sendPasswordReset = async (email: string) => {
+  if (!auth || !isFirebaseConfigured) return;
+  await sendPasswordResetEmail(auth, email);
 };
 
 export const getCurrentUser = () => auth?.currentUser ?? null;

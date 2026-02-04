@@ -10,6 +10,7 @@ interface HeaderBarProps {
   onManageAccount?: () => void;
   onStartTour?: () => void;
   onShareApp?: () => void;
+  onOpenAuth?: () => void;
   currentRoute: 'playbook' | 'builder';
   sublabel?: string;
   user: User | null;
@@ -22,6 +23,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
   onManageAccount,
   onStartTour,
   onShareApp,
+  onOpenAuth,
   currentRoute,
   sublabel,
   user
@@ -148,12 +150,16 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
                 <button
                   onClick={() => {
                     setIsMenuOpen(false);
-                    signInWithGoogle().catch((error) => console.error('Failed to sign in', error));
+                    if (onOpenAuth) {
+                      onOpenAuth();
+                    } else {
+                      signInWithGoogle().catch((error) => console.error('Failed to sign in', error));
+                    }
                   }}
                   className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-medium text-slate-200 hover:bg-slate-800"
                 >
                   <LogIn size={14} />
-                  Sign in with Google
+                  Sign in
                 </button>
               )}
             </div>

@@ -6,6 +6,7 @@ import Sidebar from './components/Sidebar';
 import HeaderBar from './components/HeaderBar';
 import WorkflowSidebar from './components/WorkflowSidebar';
 import AccountModal from './components/AccountModal';
+import AuthModal from './components/AuthModal';
 import ShareModal from './components/ShareModal';
 import { Player, InteractionMode, Play, Team, Point, Force, Formation } from './types';
 import { loadPlaysFromStorage, savePlaysToStorage, loadFormationsFromStorage, saveFormationsToStorage, normalizeFormationPlayers, normalizePlay, loadPendingSelection, clearPendingSelection, setPendingManageTeams, clearPlaybookStorage, hasSeenOnboarding, setSeenOnboarding, consumePendingTour } from './services/storage';
@@ -52,6 +53,7 @@ const App: React.FC = () => {
   const [formationNameError, setFormationNameError] = useState<string | null>(null);
   const [playbookLoaded, setPlaybookLoaded] = useState(false);
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
   const [pendingSaveAction, setPendingSaveAction] = useState<null | { type: 'play'; name?: string } | { type: 'formation' }>(null);
   const [authUser, setAuthUser] = useState<ReturnType<typeof getCurrentUser>>(getCurrentUser());
   const [showAccountModal, setShowAccountModal] = useState(false);
@@ -952,26 +954,16 @@ const App: React.FC = () => {
             </div>
             <div className="p-6 space-y-3">
               <p className="text-sm text-slate-300">
-                Sign in with Google to save plays and formations to your playbook.
+                Sign in to save plays and formations to your playbook.
               </p>
               <button
                 onClick={() => {
-                  signInWithGoogle()
-                    .then(() => {
-                      setShowAuthPrompt(false);
-                      const pending = pendingSaveAction;
-                      setPendingSaveAction(null);
-                      if (pending?.type === 'play') {
-                        savePlay(pending.name);
-                      } else if (pending?.type === 'formation') {
-                        saveFormation();
-                      }
-                    })
-                    .catch((error) => console.error('Failed to sign in', error));
+                  setShowAuthPrompt(false);
+                  setShowAuthModal(true);
                 }}
                 className="w-full px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest bg-slate-100 text-slate-900 hover:bg-white shadow-lg"
               >
-                Sign in with Google
+                Sign in
               </button>
               <button
                 onClick={() => { setShowAuthPrompt(false); setPendingSaveAction(null); }}
@@ -983,6 +975,22 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
+
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => {
+          setShowAuthModal(false);
+          const currentUser = getCurrentUser();
+          if (!currentUser || currentUser.isAnonymous) return;
+          const pending = pendingSaveAction;
+          setPendingSaveAction(null);
+          if (pending?.type === 'play') {
+            savePlay(pending.name);
+          } else if (pending?.type === 'formation') {
+            saveFormation();
+          }
+        }}
+      />
 
       <AccountModal
         isOpen={showAccountModal}
@@ -1045,6 +1053,9 @@ const App: React.FC = () => {
         }}
         onShareApp={() => {
           shareApp();
+        }}
+        onOpenAuth={() => {
+          setShowAuthModal(true);
         }}
         currentRoute="builder"
         sublabel="Builder"

@@ -19,6 +19,7 @@ import HeaderBar from './components/HeaderBar';
 import AccountModal from './components/AccountModal';
 import OnboardingIntroModal from './components/OnboardingIntroModal';
 import ShareModal from './components/ShareModal';
+import AuthModal from './components/AuthModal';
 import { createTeam, deleteAccountData, deleteFormationFromFirestore, deletePlayFromFirestore, fetchFormationsForUser, fetchPlaysForUser, fetchTeamsForUser, isFirestoreEnabled, saveFormationToFirestore, savePlayToFirestore } from './services/firestore';
 import { User } from 'firebase/auth';
 
@@ -118,6 +119,7 @@ const PlaybookPage: React.FC = () => {
   const [showOnboardingIntro, setShowOnboardingIntro] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   const navigate = useCallback((path: string) => {
     window.history.pushState({}, '', path);
@@ -424,6 +426,9 @@ const PlaybookPage: React.FC = () => {
         onShareApp={() => {
           shareApp();
         }}
+        onOpenAuth={() => {
+          setShowAuthModal(true);
+        }}
         currentRoute="playbook"
         sublabel="Playbook"
         user={user}
@@ -616,6 +621,11 @@ const PlaybookPage: React.FC = () => {
           onClose={() => setShowShareModal(false)}
           onCopy={copyShareLink}
           copyStatus={shareStatus}
+        />
+
+        <AuthModal
+          isOpen={showAuthModal}
+          onClose={() => setShowAuthModal(false)}
         />
 
         {showTeamModal && (
