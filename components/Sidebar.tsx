@@ -50,6 +50,7 @@ interface SidebarProps {
   throwControls: ThrowControlsState;
   onUpdateSpeed?: (id: string, speed: number) => void;
   onUpdateAcceleration?: (id: string, acc: number) => void;
+  onUpdatePathStartOffset?: (id: string, offset: number) => void;
   onUpdateRole?: (id: string, role: 'handler' | 'cutter') => void;
   onUpdateCutterDefense?: (id: string, cutterDefense: 'under' | 'deep') => void;
   isPlaying: boolean;
@@ -65,7 +66,7 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({ 
   description, onUpdateDescription,
   players, throws, selectedPlayerId, onDeletePlayer, onClearPath,
-  onUndoPathPoint, onAssignDisc, throwControls, onUpdateSpeed, onUpdateAcceleration,
+  onUndoPathPoint, onAssignDisc, throwControls, onUpdateSpeed, onUpdateAcceleration, onUpdatePathStartOffset,
   onUpdateRole, onUpdateCutterDefense, isPlaying,
   animationState, animationTime, onStartAnimation, onTogglePause, onStopAnimation, onResetAnimation, hasPlayers
 }) => {
@@ -316,6 +317,24 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div className="flex items-center justify-between mb-1"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><Activity size={12} /> Explosiveness</label><span className="text-xs font-mono text-indigo-400 font-bold">{(selectedPlayer.acceleration).toFixed(1)} yd/s²</span></div>
                 <input type="range" min="1" max="15" step="0.5" value={selectedPlayer.acceleration} onChange={(e) => onUpdateAcceleration?.(selectedPlayer.id, parseFloat(e.target.value))} disabled={isPlaying} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
               </div>
+              {selectedPlayer.team === 'offense' && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">Route Start</label>
+                    <span className="text-xs font-mono text-indigo-400 font-bold">{(selectedPlayer.pathStartOffset ?? 0).toFixed(1)}s</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="-2"
+                    max="4"
+                    step="0.1"
+                    value={selectedPlayer.pathStartOffset ?? 0}
+                    onChange={(e) => onUpdatePathStartOffset?.(selectedPlayer.id, parseFloat(e.target.value))}
+                    disabled={isPlaying}
+                    className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                  />
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-1 gap-2 mt-4">
               {selectedPlayer.team === 'offense' && (

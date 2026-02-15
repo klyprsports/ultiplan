@@ -14,6 +14,7 @@ export interface Player {
   y: number;
   label: string;
   path: Point[];
+  pathStartOffset?: number;
   speed: number; // Max speed in yards per second
   acceleration: number; // Acceleration in yards per second squared
   hasDisc?: boolean;

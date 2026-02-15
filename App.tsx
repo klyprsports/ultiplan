@@ -382,6 +382,9 @@ const App: React.FC = () => {
         const L = Math.sqrt(Math.pow(p2.x - p1.x, 2) + Math.pow(p2.y - p1.y, 2));
         totalTime += L / (player.speed * 0.9);
       }
+      if (player.team === 'offense') {
+        totalTime += Math.max(0, player.pathStartOffset ?? 0);
+      }
       if (totalTime > maxDur) maxDur = totalTime;
     });
     return maxDur + 1.5;
@@ -398,7 +401,9 @@ const App: React.FC = () => {
   }, []);
 
   const calculatePositionAtTime = useCallback((player: Player, time: number): Point => {
-    if (player.path.length === 0 || time <= 0) return { x: player.x, y: player.y };
+    const startOffset = player.team === 'offense' ? (player.pathStartOffset ?? 0) : 0;
+    const adjustedTime = time - startOffset;
+    if (player.path.length === 0 || adjustedTime <= 0) return { x: player.x, y: player.y };
     const acc = player.acceleration;
     const topSpeed = player.speed;
     const dec = acc * 2.0;
@@ -415,7 +420,7 @@ const App: React.FC = () => {
       vertexSpeeds.push(topSpeed * speedFactor);
     }
     vertexSpeeds.push(0);
-    let tRem = time;
+    let tRem = adjustedTime;
     for (let i = 0; i < points.length - 1; i++) {
       const p1 = points[i], p2 = points[i+1];
       const dx = p2.x - p1.x, dy = p2.y - p1.y;
@@ -684,7 +689,11 @@ const App: React.FC = () => {
     const newPlayer: Player = {
       id, team, x, y,
       label: team === 'offense' ? `O${nextNum}` : `D${nextNum}`,
-      path: [], speed: DEFAULT_SPEED, acceleration: DEFAULT_ACCELERATION, hasDisc: false,
+      path: [],
+      pathStartOffset: 0,
+      speed: DEFAULT_SPEED,
+      acceleration: DEFAULT_ACCELERATION,
+      hasDisc: false,
       role: team === 'offense' ? 'cutter' : undefined
     };
     setPlayers(prev => [...prev, newPlayer]);
@@ -702,6 +711,7 @@ const App: React.FC = () => {
       y,
       label: `O${labelNum}`,
       path: [],
+      pathStartOffset: 0,
       speed: DEFAULT_SPEED,
       acceleration: DEFAULT_ACCELERATION,
       hasDisc: false,
@@ -731,6 +741,7 @@ const App: React.FC = () => {
       y,
       label: `D${labelNum}`,
       path: [],
+      pathStartOffset: 0,
       speed: DEFAULT_SPEED,
       acceleration: DEFAULT_ACCELERATION,
       hasDisc: false
@@ -759,6 +770,14 @@ const App: React.FC = () => {
 
   const updatePlayerAcceleration = (id: string, acceleration: number) => {
     setPlayers(prev => prev.map(p => p.id === id ? { ...p, acceleration } : p));
+  };
+
+  const updatePlayerPathStartOffset = (id: string, offset: number) => {
+    setPlayers(prev => prev.map(p => {
+      if (p.id !== id) return p;
+      if (p.team !== 'offense') return p;
+      return { ...p, pathStartOffset: offset };
+    }));
   };
 
   const updatePlayerRole = (id: string, role: 'handler' | 'cutter') => {
@@ -845,6 +864,7 @@ const App: React.FC = () => {
         y,
         label: `D${manualDefense.length + idx + 1}`,
         path: [],
+        pathStartOffset: 0,
         speed: op.speed,
         acceleration: op.acceleration,
         hasDisc: false,
@@ -1009,6 +1029,7 @@ const App: React.FC = () => {
     return players.map(p => ({
       ...p,
       path: [],
+      pathStartOffset: 0,
       hasDisc: p.team === 'offense' ? !!p.hasDisc : false,
       autoAssigned: false,
       coversOffenseId: undefined
@@ -1079,9 +1100,9 @@ const App: React.FC = () => {
       const key = `${player.team}:${player.label}`;
       const target = endPositions.get(key);
       if (!target) {
-        return { ...player, path: [], hasDisc: false };
+        return { ...player, path: [], pathStartOffset: 0, hasDisc: false };
       }
-      return { ...player, x: target.x, y: target.y, path: [], hasDisc: target.hasDisc };
+      return { ...player, x: target.x, y: target.y, path: [], pathStartOffset: 0, hasDisc: target.hasDisc };
     });
     const existing = savedPlays.find((p) => p.id === editingPlayId);
     const visibility = existing?.visibility || 'private';
@@ -1667,6 +1688,7 @@ const App: React.FC = () => {
           }}
           onUpdateSpeed={updatePlayerSpeed} 
           onUpdateAcceleration={updatePlayerAcceleration} 
+          onUpdatePathStartOffset={updatePlayerPathStartOffset}
           onUpdateRole={updatePlayerRole}
           onUpdateCutterDefense={updateCutterDefense}
           isPlaying={isAnimationActive} 

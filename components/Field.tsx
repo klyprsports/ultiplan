@@ -133,8 +133,9 @@ const Field: React.FC<FieldProps> = ({
 
   const handleMouseUp = () => { setIsDragging(false); setActivePlayerId(null); };
 
-  const calculatePositionAtTime = (startX: number, startY: number, path: Point[], time: number, topSpeed: number, acc: number): Point => {
-    if (path.length === 0 || time <= 0) return { x: startX, y: startY };
+  const calculatePositionAtTime = (startX: number, startY: number, path: Point[], time: number, topSpeed: number, acc: number, startOffset = 0): Point => {
+    const adjustedTime = time - startOffset;
+    if (path.length === 0 || adjustedTime <= 0) return { x: startX, y: startY };
     const dec = acc * 2.0;
     const points = [{ x: startX, y: startY }, ...path];
     const vertexSpeeds = [0];
@@ -149,7 +150,7 @@ const Field: React.FC<FieldProps> = ({
       vertexSpeeds.push(topSpeed * speedFactor);
     }
     vertexSpeeds.push(0);
-    let tRem = time;
+    let tRem = adjustedTime;
     for (let i = 0; i < points.length - 1; i++) {
       const p1 = points[i], p2 = points[i+1];
       const dx = p2.x - p1.x, dy = p2.y - p1.y;
@@ -198,13 +199,17 @@ const Field: React.FC<FieldProps> = ({
 
   const getAnimatedPosition = (player: Player): Point => {
     if (animationTime === null) return { x: player.x, y: player.y };
-    if (player.path.length > 0) return calculatePositionAtTime(player.x, player.y, player.path, animationTime, player.speed, player.acceleration);
+    if (player.path.length > 0) {
+      const startOffset = player.team === 'offense' ? (player.pathStartOffset ?? 0) : 0;
+      return calculatePositionAtTime(player.x, player.y, player.path, animationTime, player.speed, player.acceleration, startOffset);
+    }
     if (player.team === 'defense') {
       const targetId = defensiveAssignments[player.id];
       const targetOffense = players.find(p => p.id === targetId);
       if (targetOffense) {
         const delayedTime = Math.max(0, animationTime - REACTION_DELAY);
-        const targetPosAtDelayedTime = calculatePositionAtTime(targetOffense.x, targetOffense.y, targetOffense.path, delayedTime, targetOffense.speed, targetOffense.acceleration);
+        const startOffset = targetOffense.pathStartOffset ?? 0;
+        const targetPosAtDelayedTime = calculatePositionAtTime(targetOffense.x, targetOffense.y, targetOffense.path, delayedTime, targetOffense.speed, targetOffense.acceleration, startOffset);
         return { x: player.x + (targetPosAtDelayedTime.x - targetOffense.x), y: player.y + (targetPosAtDelayedTime.y - targetOffense.y) };
       }
     }

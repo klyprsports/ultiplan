@@ -61,7 +61,8 @@ const hydratePlayers = (players: Player[]) => {
   return players.map((player) => ({
     ...player,
     id: player.id || generateId(),
-    path: player.path || []
+    path: player.path || [],
+    pathStartOffset: typeof player.pathStartOffset === 'number' ? player.pathStartOffset : 0
   }));
 };
 
@@ -73,6 +74,7 @@ const serializePlayer = (player: Player) => {
     y: player.y,
     label: player.label,
     path: (player.path || []).map((pt) => ({ x: pt.x, y: pt.y })),
+    pathStartOffset: typeof player.pathStartOffset === 'number' ? player.pathStartOffset : 0,
     speed: player.speed,
     acceleration: player.acceleration,
     hasDisc: !!player.hasDisc

@@ -127,6 +127,7 @@ export const normalizePlayPlayers = (playPlayers: Player[]) => {
       role: p.role ?? 'cutter',
       hasDisc: !!p.hasDisc,
       cutterDefense: p.cutterDefense ?? null,
+      pathStartOffset: p.pathStartOffset ?? 0,
       path: p.path.map(pt => ({ x: pt.x, y: pt.y }))
     }))
     .sort((a, b) => {

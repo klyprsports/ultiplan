@@ -60,6 +60,7 @@ export const buildPresetFormation = (formation: 'vertical' | 'side' | 'ho', curr
     y: pos.y,
     label: `O${idx + 1}`,
     path: [],
+    pathStartOffset: 0,
     speed: DEFAULT_SPEED,
     acceleration: DEFAULT_ACCELERATION,
     hasDisc: (formation === 'ho' && pos.y === endzoneLine - 2 && pos.x === FIELD_WIDTH / 2) || (formation === 'vertical' && idx === 5),
