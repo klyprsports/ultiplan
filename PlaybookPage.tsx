@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Trash2, LayoutGrid, Copy, Share2, Users, Plus } from 'lucide-react';
+import { Trash2, LayoutGrid, Share2, Users, Plus } from 'lucide-react';
 import { Formation, Play, Player, TeamInfo } from './types';
 import {
   loadFormationsFromStorage,
@@ -94,14 +94,6 @@ const MiniField: React.FC<{ players: Player[]; showPaths?: boolean }> = ({ playe
   );
 };
 
-const generateId = () => {
-  try {
-    return crypto.randomUUID();
-  } catch (e) {
-    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-  }
-};
-
 const PlaybookPage: React.FC = () => {
   const [tab, setTab] = useState<'plays' | 'formations'>('plays');
   const [savedPlays, setSavedPlays] = useState<Play[]>([]);
@@ -113,8 +105,6 @@ const PlaybookPage: React.FC = () => {
   const [sharingTarget, setSharingTarget] = useState<{ type: 'play' | 'formation'; item: Play | Formation } | null>(null);
   const [sharingVisibility, setSharingVisibility] = useState<'private' | 'team' | 'public'>('private');
   const [sharingTeamIds, setSharingTeamIds] = useState<string[]>([]);
-  const [copyTarget, setCopyTarget] = useState<{ type: 'play' | 'formation'; item: Play | Formation } | null>(null);
-  const [copyName, setCopyName] = useState('');
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [deleteAccountError, setDeleteAccountError] = useState<string | null>(null);
@@ -344,56 +334,6 @@ const PlaybookPage: React.FC = () => {
     setSharingTarget(null);
   };
 
-  const clonePlay = async (play: Play, nameOverride?: string) => {
-    try {
-      await ensureSignedInForWrite();
-      const currentUser = getCurrentUser();
-      if (!currentUser) return;
-      const newPlay: Play = {
-        ...play,
-        id: generateId(),
-        ownerId: currentUser.uid,
-        visibility: 'private',
-        sharedTeamIds: [],
-        createdBy: currentUser.uid,
-        lastEditedBy: currentUser.uid,
-        sourcePlayId: play.id,
-        name: nameOverride?.trim() || `${play.name} (Copy)`
-      };
-      setSavedPlays((prev) => [newPlay, ...prev]);
-      if (isFirestoreEnabled()) {
-        await savePlayToFirestore(newPlay);
-      }
-    } catch (error) {
-      console.error('Failed to clone play', error);
-    }
-  };
-
-  const cloneFormation = async (formation: Formation, nameOverride?: string) => {
-    try {
-      await ensureSignedInForWrite();
-      const currentUser = getCurrentUser();
-      if (!currentUser) return;
-      const newFormation: Formation = {
-        ...formation,
-        id: generateId(),
-        ownerId: currentUser.uid,
-        visibility: 'private',
-        sharedTeamIds: [],
-        createdBy: currentUser.uid,
-        lastEditedBy: currentUser.uid,
-        sourceFormationId: formation.id,
-        name: nameOverride?.trim() || `${formation.name} (Copy)`
-      };
-      setSavedFormations((prev) => [newFormation, ...prev]);
-      if (isFirestoreEnabled()) {
-        await saveFormationToFirestore(newFormation);
-      }
-    } catch (error) {
-      console.error('Failed to clone formation', error);
-    }
-  };
-
   const handleCreateTeam = async () => {
     const name = newTeamName.trim();
     if (!name) return;
@@ -473,15 +413,40 @@ const PlaybookPage: React.FC = () => {
             ) : (
               <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {savedPlays.map((play) => (
-                  <div key={play.id} className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg max-w-[220px] w-full mx-auto overflow-hidden">
+                  <div
+                    key={play.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openPlay(play.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openPlay(play.id);
+                      }
+                    }}
+                    className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg w-full overflow-hidden cursor-pointer hover:border-emerald-500/60 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        <h3 className="text-lg font-bold text-slate-100 truncate">{play.name}</h3>
-                        <div className="text-[10px] uppercase tracking-[0.24em] text-slate-400 font-bold mt-1 w-full truncate">
-                          {play.players.length} Players - {play.force} Force
-                        </div>
+                        <h3 className="text-base sm:text-lg font-extrabold text-white leading-tight break-words" title={play.name}>
+                          {play.name}
+                        </h3>
                         <div className="mt-2 flex flex-wrap gap-2 text-[9px] uppercase tracking-widest">
-                          <span className="px-2 py-1 rounded-full bg-slate-800 text-slate-300">{play.visibility || 'private'}</span>
+                          {play.ownerId === user?.uid ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openSharing({ type: 'play', item: play });
+                              }}
+                              className="px-2 py-1 rounded-full bg-slate-800 text-slate-200 hover:bg-slate-700 transition-colors"
+                              aria-label="Change sharing level"
+                              title="Change sharing level"
+                            >
+                              {play.visibility || 'private'}
+                            </button>
+                          ) : (
+                            <span className="px-2 py-1 rounded-full bg-slate-800 text-slate-300">{play.visibility || 'private'}</span>
+                          )}
                           {play.ownerId && play.ownerId !== user?.uid && (
                             <span className="px-2 py-1 rounded-full bg-indigo-500/20 text-indigo-200">Shared</span>
                           )}
@@ -490,16 +455,10 @@ const PlaybookPage: React.FC = () => {
                       <div className="flex items-center gap-2 shrink-0">
                         {play.ownerId === user?.uid && (
                           <button
-                            onClick={() => openSharing({ type: 'play', item: play })}
-                            className="p-2 rounded-lg text-slate-400 hover:text-emerald-300 hover:bg-slate-800 transition-colors"
-                            aria-label="Sharing settings"
-                          >
-                            <Share2 size={16} />
-                          </button>
-                        )}
-                        {play.ownerId === user?.uid && (
-                          <button
-                            onClick={() => deletePlay(play.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deletePlay(play.id);
+                            }}
                             className="p-2 rounded-lg text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-colors"
                             aria-label="Delete play"
                           >
@@ -507,23 +466,6 @@ const PlaybookPage: React.FC = () => {
                           </button>
                         )}
                       </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => openPlay(play.id)}
-                        className="w-full py-2 rounded-xl bg-emerald-500 text-emerald-950 font-bold uppercase tracking-widest text-xs hover:bg-emerald-400 transition-colors"
-                      >
-                        Open
-                      </button>
-                      <button
-                        onClick={() => {
-                          setCopyTarget({ type: 'play', item: play });
-                          setCopyName(`${play.name} (Copy)`);
-                        }}
-                        className="w-full py-2 rounded-xl bg-slate-800 text-slate-200 font-bold uppercase tracking-widest text-xs hover:bg-slate-700 transition-colors flex items-center justify-center"
-                      >
-                        Make a Copy
-                      </button>
                     </div>
                     <div className="mt-2 w-full max-w-[180px] aspect-[4/11] rounded-lg overflow-hidden bg-slate-950/40 border border-slate-800/80 self-center">
                       <MiniField players={play.players} showPaths />
@@ -542,15 +484,43 @@ const PlaybookPage: React.FC = () => {
             ) : (
               <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {savedFormations.map((formation) => (
-                  <div key={formation.id} className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg max-w-[220px] w-full mx-auto overflow-hidden">
+                  <div
+                    key={formation.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openFormation(formation.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openFormation(formation.id);
+                      }
+                    }}
+                    className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg w-full overflow-hidden cursor-pointer hover:border-indigo-500/60 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/70"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        <h3 className="text-lg font-bold text-slate-100 truncate">{formation.name}</h3>
-                        <div className="text-[10px] uppercase tracking-[0.24em] text-slate-400 font-bold mt-1 w-full truncate">
+                        <h3 className="text-base sm:text-lg font-extrabold text-white leading-tight break-words" title={formation.name}>
+                          {formation.name}
+                        </h3>
+                        <div className="text-[11px] uppercase tracking-[0.2em] text-slate-300 font-bold mt-1 w-full truncate">
                           {formation.players.filter((p) => p.team === 'offense').length} O - {formation.players.filter((p) => p.team === 'defense').length} D
                         </div>
                         <div className="mt-2 flex flex-wrap gap-2 text-[9px] uppercase tracking-widest">
-                          <span className="px-2 py-1 rounded-full bg-slate-800 text-slate-300">{formation.visibility || 'private'}</span>
+                          {formation.ownerId === user?.uid ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openSharing({ type: 'formation', item: formation });
+                              }}
+                              className="px-2 py-1 rounded-full bg-slate-800 text-slate-200 hover:bg-slate-700 transition-colors"
+                              aria-label="Change sharing level"
+                              title="Change sharing level"
+                            >
+                              {formation.visibility || 'private'}
+                            </button>
+                          ) : (
+                            <span className="px-2 py-1 rounded-full bg-slate-800 text-slate-300">{formation.visibility || 'private'}</span>
+                          )}
                           {formation.ownerId && formation.ownerId !== user?.uid && (
                             <span className="px-2 py-1 rounded-full bg-indigo-500/20 text-indigo-200">Shared</span>
                           )}
@@ -559,16 +529,10 @@ const PlaybookPage: React.FC = () => {
                       <div className="flex items-center gap-2 shrink-0">
                         {formation.ownerId === user?.uid && (
                           <button
-                            onClick={() => openSharing({ type: 'formation', item: formation })}
-                            className="p-2 rounded-lg text-slate-400 hover:text-emerald-300 hover:bg-slate-800 transition-colors"
-                            aria-label="Sharing settings"
-                          >
-                            <Share2 size={16} />
-                          </button>
-                        )}
-                        {formation.ownerId === user?.uid && (
-                          <button
-                            onClick={() => deleteFormation(formation.id)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteFormation(formation.id);
+                            }}
                             className="p-2 rounded-lg text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-colors"
                             aria-label="Delete formation"
                           >
@@ -576,23 +540,6 @@ const PlaybookPage: React.FC = () => {
                           </button>
                         )}
                       </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        onClick={() => openFormation(formation.id)}
-                        className="w-full py-2 rounded-xl bg-indigo-500 text-white font-bold uppercase tracking-widest text-xs hover:bg-indigo-400 transition-colors"
-                      >
-                        Open
-                      </button>
-                      <button
-                        onClick={() => {
-                          setCopyTarget({ type: 'formation', item: formation });
-                          setCopyName(`${formation.name} (Copy)`);
-                        }}
-                        className="w-full py-2 rounded-xl bg-slate-800 text-slate-200 font-bold uppercase tracking-widest text-xs hover:bg-slate-700 transition-colors flex items-center justify-center"
-                      >
-                        Make a Copy
-                        </button>
                     </div>
                     <div className="mt-2 w-full max-w-[180px] aspect-[4/11] rounded-lg overflow-hidden bg-slate-950/40 border border-slate-800/80 self-center">
                       <MiniField players={formation.players} />
@@ -631,48 +578,6 @@ const PlaybookPage: React.FC = () => {
           isOpen={showAuthModal}
           onClose={() => setShowAuthModal(false)}
         />
-
-        {copyTarget && (
-          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/50">
-                <h2 className="text-base font-bold">Make a Copy</h2>
-                <button onClick={() => setCopyTarget(null)} className="text-slate-500 hover:text-white transition-colors">X</button>
-              </div>
-              <div className="p-6 space-y-4">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">New name</label>
-                  <input
-                    autoFocus
-                    type="text"
-                    value={copyName}
-                    onChange={(e) => setCopyName(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-                    placeholder="Copy name"
-                  />
-                </div>
-                <div className="flex gap-3">
-                  <button onClick={() => setCopyTarget(null)} className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all">Cancel</button>
-                  <button
-                    onClick={async () => {
-                      if (!copyTarget) return;
-                      if (copyTarget.type === 'play') {
-                        await clonePlay(copyTarget.item as Play, copyName);
-                      } else {
-                        await cloneFormation(copyTarget.item as Formation, copyName);
-                      }
-                      setCopyTarget(null);
-                      setCopyName('');
-                    }}
-                    className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition-all"
-                  >
-                    Create Copy
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {showTeamModal && (
           <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
