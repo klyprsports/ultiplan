@@ -353,8 +353,6 @@ const PlaybookPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-950 text-white">
       <HeaderBar
-        onOpenPlaybook={() => navigate('/playbook')}
-        onOpenBuilder={() => navigate('/builder')}
         onManageTeams={() => {
           setShowTeamModal(true);
           clearPendingManageTeams();
@@ -371,7 +369,6 @@ const PlaybookPage: React.FC = () => {
         onOpenAuth={() => {
           setShowAuthModal(true);
         }}
-        currentRoute="playbook"
         sublabel="Playbook"
         user={user}
       />

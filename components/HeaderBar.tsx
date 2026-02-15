@@ -1,30 +1,24 @@
 import React, { useState } from 'react';
-import { Menu, LayoutGrid, Users, LogOut, LogIn, Library, BookOpen, UserRound, Sparkles, Share2 } from 'lucide-react';
+import { Menu, Users, LogOut, LogIn, BookOpen, UserRound, Sparkles, Share2 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { signInWithGoogle, signOutUser } from '../services/auth';
 
 interface HeaderBarProps {
-  onOpenPlaybook: () => void;
-  onOpenBuilder: () => void;
   onManageTeams: () => void;
   onManageAccount?: () => void;
   onStartTour?: () => void;
   onShareApp?: () => void;
   onOpenAuth?: () => void;
-  currentRoute: 'playbook' | 'builder';
   sublabel?: string;
   user: User | null;
 }
 
 const HeaderBar: React.FC<HeaderBarProps> = ({
-  onOpenPlaybook,
-  onOpenBuilder,
   onManageTeams,
   onManageAccount,
   onStartTour,
   onShareApp,
   onOpenAuth,
-  currentRoute,
   sublabel,
   user
 }) => {
@@ -48,22 +42,6 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
         </div>
       </div>
       <div className="flex items-center gap-3">
-        <div className="hidden sm:flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-xl p-1 text-[11px] font-bold uppercase tracking-widest">
-          <button
-            onClick={onOpenPlaybook}
-            className={`px-3 py-2 rounded-lg flex items-center gap-2 ${currentRoute === 'playbook' ? 'bg-emerald-500 text-emerald-950' : 'text-slate-400 hover:text-slate-200'}`}
-            aria-current={currentRoute === 'playbook' ? 'page' : undefined}
-          >
-            <Library size={14} /> Playbook
-          </button>
-          <button
-            onClick={onOpenBuilder}
-            className={`px-3 py-2 rounded-lg flex items-center gap-2 ${currentRoute === 'builder' ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-            aria-current={currentRoute === 'builder' ? 'page' : undefined}
-          >
-            <LayoutGrid size={14} /> Builder
-          </button>
-        </div>
         {user && (
           <div className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-900 px-3 py-2">
             {user.photoURL ? (

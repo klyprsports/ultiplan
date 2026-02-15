@@ -1539,14 +1539,6 @@ const App: React.FC = () => {
       )}
 
       <HeaderBar
-        onOpenPlaybook={() => {
-          window.history.pushState({}, '', '/playbook');
-          window.dispatchEvent(new PopStateEvent('popstate'));
-        }}
-        onOpenBuilder={() => {
-          window.history.pushState({}, '', '/builder');
-          window.dispatchEvent(new PopStateEvent('popstate'));
-        }}
         onManageTeams={() => {
           setPendingManageTeams();
           window.history.pushState({}, '', '/playbook');
@@ -1564,7 +1556,6 @@ const App: React.FC = () => {
         onOpenAuth={() => {
           setShowAuthModal(true);
         }}
-        currentRoute="builder"
         sublabel="Builder"
         user={authUser}
       />
