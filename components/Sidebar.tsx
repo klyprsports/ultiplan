@@ -57,6 +57,9 @@ interface SidebarProps {
   animationState: 'IDLE' | 'PLAYING' | 'PAUSED';
   animationTime: number;
   onStartAnimation: () => void;
+  onStartSequence?: () => void;
+  canStartSequence?: boolean;
+  startSequenceReason?: string;
   onTogglePause: () => void;
   onStopAnimation: () => void;
   onResetAnimation: () => void;
@@ -68,7 +71,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   players, throws, selectedPlayerId, onDeletePlayer, onClearPath,
   onUndoPathPoint, onAssignDisc, throwControls, onUpdateSpeed, onUpdateAcceleration, onUpdatePathStartOffset,
   onUpdateRole, onUpdateCutterDefense, isPlaying,
-  animationState, animationTime, onStartAnimation, onTogglePause, onStopAnimation, onResetAnimation, hasPlayers
+  animationState, animationTime, onStartAnimation, onStartSequence, canStartSequence, startSequenceReason, onTogglePause, onStopAnimation, onResetAnimation, hasPlayers
 }) => {
   const [isEditingNotes, setIsEditingNotes] = useState(false);
   const selectedPlayer = players.find(p => p.id === selectedPlayerId);
@@ -162,6 +165,14 @@ const Sidebar: React.FC<SidebarProps> = ({
               {!isAnimationActive ? (
                 <>
                   <button onClick={onStartAnimation} disabled={!hasPlayers} data-tour-id="run-button" className="px-4 py-1.5 rounded-md text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-emerald-900/20 transition-all"><PlayIcon size={14} fill="white" /> Run</button>
+                  <button
+                    onClick={onStartSequence}
+                    disabled={!hasPlayers || !canStartSequence}
+                    title={startSequenceReason}
+                    className="px-3 py-1.5 rounded-md text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 shadow-lg shadow-indigo-900/20 transition-all"
+                  >
+                    Run Sequence
+                  </button>
                   <button onClick={onResetAnimation} disabled={!hasPlayers || animationTime === 0} className="w-8 h-8 rounded-md bg-slate-800 hover:bg-slate-700 flex items-center justify-center shadow-lg shadow-slate-900/20 transition-all disabled:opacity-50"><RotateCcw size={14} /></button>
                 </>
               ) : (

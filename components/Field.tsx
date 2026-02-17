@@ -230,13 +230,11 @@ const Field: React.FC<FieldProps> = ({
     return points[points.length - 1];
   };
 
-  const animationDebug = useMemo(() => {
+  const animatedPositions = useMemo(() => {
     const positions = new Map<string, Point>();
-    const chaseTargets = new Map<string, Point>();
-    const chasePaths = new Map<string, Point[]>();
     if (animationTime === null) {
       players.forEach((player) => positions.set(player.id, { x: player.x, y: player.y }));
-      return { positions, chaseTargets, chasePaths };
+      return positions;
     }
 
     const offensePlayers = players.filter((p) => p.team === 'offense');
@@ -369,26 +367,16 @@ const Field: React.FC<FieldProps> = ({
       let simY = player.y;
       let velX = 0;
       let velY = 0;
-      const targetTrail: Point[] = [];
-      let finalDesired: Point = { x: simX, y: simY };
-      let stepIndex = 0;
       let previousResponseDesired: Point | null = null;
       let previousDesiredDir: Point | null = null;
       let burstTimeRemaining = 0;
 
       for (let t = dt; t <= animationTime + 1e-6; t += dt) {
-        const targetOffensePosNow = getOffensePositionAtTime(targetOffense, t);
         const responseTime = Math.max(0, t - REACTION_DELAY);
         const targetOffensePosResponse = getOffensePositionAtTime(targetOffense, responseTime);
         const discHolder = discHolderId ? offenseById.get(discHolderId) : undefined;
         const discHolderPosResponse = discHolder ? getOffensePositionAtTime(discHolder, responseTime) : undefined;
-        const desiredNow = getDefenderTarget(player, targetOffense, targetOffensePosNow, discHolder?.id);
         const desiredResponse = getDefenderTarget(player, targetOffense, targetOffensePosResponse, discHolder?.id);
-        finalDesired = desiredNow;
-        if (stepIndex % 4 === 0) {
-          targetTrail.push(desiredNow);
-        }
-        stepIndex += 1;
 
         let steeringTarget = desiredResponse;
         const isMarkingDiscHolder = Boolean(discHolder && targetOffense.id === discHolder.id);
@@ -525,16 +513,12 @@ const Field: React.FC<FieldProps> = ({
       }
 
       positions.set(player.id, { x: simX, y: simY });
-      chaseTargets.set(player.id, finalDesired);
-      if (targetTrail.length > 0) {
-        chasePaths.set(player.id, targetTrail);
-      }
     });
 
-    return { positions, chaseTargets, chasePaths };
+    return positions;
   }, [animationTime, players, defensiveAssignments, discHolderId, force]);
 
-  const getAnimatedPosition = (player: Player): Point => animationDebug.positions.get(player.id) ?? { x: player.x, y: player.y };
+  const getAnimatedPosition = (player: Player): Point => animatedPositions.get(player.id) ?? { x: player.x, y: player.y };
 
   const w = FIELD_WIDTH * SCALE, h = FIELD_HEIGHT * SCALE, ez = ENDZONE_DEPTH * SCALE;
   const handleDrop = (clientX: number, clientY: number, payload: string) => {
@@ -667,49 +651,6 @@ const Field: React.FC<FieldProps> = ({
               return pts.length > 1 && (
                 <g key={`path-${player.id}`}>
                   <polyline points={pts.map(p => `${p.x * SCALE},${p.y * SCALE}`).join(' ')} fill="none" stroke={player.team === 'offense' ? '#60a5fa' : '#f87171'} strokeWidth="2" strokeDasharray="4 2" opacity={animationTime ? "0.3" : "0.8"} />
-                </g>
-              );
-            })}
-            {isAnimationActive && players.filter((p) => p.team === 'defense').map((player) => {
-              const chasePath = animationDebug.chasePaths.get(player.id);
-              const chaseTarget = animationDebug.chaseTargets.get(player.id);
-              if (!chaseTarget) return null;
-              return (
-                <g key={`chase-debug-${player.id}`} pointerEvents="none">
-                  {chasePath && chasePath.length > 1 && (
-                    <polyline
-                      points={chasePath.map((p) => `${p.x * SCALE},${p.y * SCALE}`).join(' ')}
-                      fill="none"
-                      stroke="#f59e0b"
-                      strokeWidth="2"
-                      strokeDasharray="3 3"
-                      opacity="0.95"
-                    />
-                  )}
-                  <circle
-                    cx={chaseTarget.x * SCALE}
-                    cy={chaseTarget.y * SCALE}
-                    r={0.5 * SCALE}
-                    fill="none"
-                    stroke="#facc15"
-                    strokeWidth="2"
-                  />
-                  <line
-                    x1={(chaseTarget.x - 0.35) * SCALE}
-                    y1={chaseTarget.y * SCALE}
-                    x2={(chaseTarget.x + 0.35) * SCALE}
-                    y2={chaseTarget.y * SCALE}
-                    stroke="#facc15"
-                    strokeWidth="2"
-                  />
-                  <line
-                    x1={chaseTarget.x * SCALE}
-                    y1={(chaseTarget.y - 0.35) * SCALE}
-                    x2={chaseTarget.x * SCALE}
-                    y2={(chaseTarget.y + 0.35) * SCALE}
-                    stroke="#facc15"
-                    strokeWidth="2"
-                  />
                 </g>
               );
             })}

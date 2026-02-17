@@ -80,6 +80,9 @@ const App: React.FC = () => {
   const [newPlayConceptName, setNewPlayConceptName] = useState<string | null>(null);
   const [startFromPlayId, setStartFromPlayId] = useState<string | null>(null);
   const [startLocked, setStartLocked] = useState(false);
+  const [sequenceRunPlayIds, setSequenceRunPlayIds] = useState<string[] | null>(null);
+  const [sequenceRunCursor, setSequenceRunCursor] = useState(0);
+  const [pendingAutoStartPlayId, setPendingAutoStartPlayId] = useState<string | null>(null);
 
   const isAnimationActive = animationState !== 'IDLE';
 
@@ -636,7 +639,7 @@ const App: React.FC = () => {
         const discPos = getDiscPosition(plan, time);
         const rotation = plan.angle < -0.2 ? -45 : plan.angle > 0.2 ? 45 : 0;
         flight = { x: discPos.x, y: discPos.y, rotation };
-        holderId = null;
+        holderId = plan.throwerId;
         const samples = 24;
         const points: Point[] = [];
         const progress = Math.min(1, Math.max(0, (time - plan.releaseTime) / plan.duration));
@@ -1144,7 +1147,34 @@ const App: React.FC = () => {
     return { ...play, players: aligned.players };
   }, [savedPlays, getSequenceAnchorPositionsByLabel, alignPlayersToEndState]);
 
+  const getSequenceRunIds = useCallback((startId: string) => {
+    let rootId = startId;
+    const seenParents = new Set<string>([rootId]);
+    while (true) {
+      const current = savedPlays.find((play) => play.id === rootId);
+      const parentId = current?.startFromPlayId;
+      if (!parentId || seenParents.has(parentId)) break;
+      rootId = parentId;
+      seenParents.add(rootId);
+    }
+
+    const ids = [rootId];
+    const seen = new Set(ids);
+    let cursor = rootId;
+    while (true) {
+      const child = savedPlays.find((play) => play.startFromPlayId === cursor);
+      if (!child || seen.has(child.id)) break;
+      ids.push(child.id);
+      seen.add(child.id);
+      cursor = child.id;
+    }
+    return ids;
+  }, [savedPlays]);
+
   const loadPlay = (play: Play) => {
+    setSequenceRunPlayIds(null);
+    setSequenceRunCursor(0);
+    setPendingAutoStartPlayId(null);
     const resolved = resolveSequencePlay(play);
     stopAnimation();
     setPlayers(resolved.players);
@@ -1163,6 +1193,104 @@ const App: React.FC = () => {
     setSelectedPlayerId(null);
     setMode(InteractionMode.SELECT);
   };
+
+  const runSequenceFromCurrentPlay = () => {
+    if (!editingPlayId) return;
+    const ids = getSequenceRunIds(editingPlayId);
+    if (ids.length === 0) return;
+    setSequenceRunPlayIds(ids);
+    setSequenceRunCursor(0);
+    const rootId = ids[0];
+    if (editingPlayId !== rootId) {
+      const rootPlay = savedPlays.find((play) => play.id === rootId);
+      if (!rootPlay) return;
+      const resolved = resolveSequencePlay(rootPlay);
+      setPendingAutoStartPlayId(rootId);
+      setAnimationState('IDLE');
+      setAnimationTime(0);
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+      setPlayers(resolved.players);
+      setThrows(resolved.throws || []);
+      setPlayName(resolved.name);
+      setForce(resolved.force);
+      setPlayDescription(resolved.description || '');
+      setEditingPlayId(resolved.id);
+      setPlayOwnerId(resolved.ownerId || getCurrentUser()?.uid || null);
+      setPlayCreatedBy(resolved.createdBy || null);
+      setPlaySourceId(resolved.sourcePlayId || null);
+      setPlayConceptId(resolved.conceptId || null);
+      setPlayConceptName(resolved.conceptName || '');
+      setStartFromPlayId(resolved.startFromPlayId || null);
+      setStartLocked(Boolean(resolved.startLocked));
+      setSelectedPlayerId(null);
+      setMode(InteractionMode.SELECT);
+      return;
+    }
+    setPendingAutoStartPlayId(null);
+    startAnimation();
+  };
+
+  const stopAnimationManually = () => {
+    setSequenceRunPlayIds(null);
+    setSequenceRunCursor(0);
+    setPendingAutoStartPlayId(null);
+    stopAnimation();
+  };
+
+  const resetAnimationManually = () => {
+    setSequenceRunPlayIds(null);
+    setSequenceRunCursor(0);
+    setPendingAutoStartPlayId(null);
+    resetAnimation();
+  };
+
+  useEffect(() => {
+    if (!sequenceRunPlayIds) return;
+    if (pendingAutoStartPlayId) return;
+    if (animationState !== 'IDLE') return;
+
+    if (sequenceRunCursor >= sequenceRunPlayIds.length - 1) {
+      setSequenceRunPlayIds(null);
+      setSequenceRunCursor(0);
+      return;
+    }
+
+    const nextCursor = sequenceRunCursor + 1;
+    const nextPlayId = sequenceRunPlayIds[nextCursor];
+    const nextPlay = savedPlays.find((play) => play.id === nextPlayId);
+    if (!nextPlay) {
+      setSequenceRunPlayIds(null);
+      setSequenceRunCursor(0);
+      return;
+    }
+
+    const resolved = resolveSequencePlay(nextPlay);
+    setPendingAutoStartPlayId(nextPlayId);
+    setSequenceRunCursor(nextCursor);
+    setPlayers(resolved.players);
+    setThrows(resolved.throws || []);
+    setPlayName(resolved.name);
+    setForce(resolved.force);
+    setPlayDescription(resolved.description || '');
+    setEditingPlayId(resolved.id);
+    setPlayOwnerId(resolved.ownerId || getCurrentUser()?.uid || null);
+    setPlayCreatedBy(resolved.createdBy || null);
+    setPlaySourceId(resolved.sourcePlayId || null);
+    setPlayConceptId(resolved.conceptId || null);
+    setPlayConceptName(resolved.conceptName || '');
+    setStartFromPlayId(resolved.startFromPlayId || null);
+    setStartLocked(Boolean(resolved.startLocked));
+    setSelectedPlayerId(null);
+    setMode(InteractionMode.SELECT);
+    setAnimationTime(0);
+  }, [sequenceRunPlayIds, pendingAutoStartPlayId, animationState, sequenceRunCursor, savedPlays, resolveSequencePlay]);
+
+  useEffect(() => {
+    if (!pendingAutoStartPlayId) return;
+    if (editingPlayId !== pendingAutoStartPlayId) return;
+    setPendingAutoStartPlayId(null);
+    startAnimation();
+  }, [pendingAutoStartPlayId, editingPlayId]);
 
   useEffect(() => {
     if (!startLocked || !startFromPlayId) return;
@@ -1254,6 +1382,13 @@ const App: React.FC = () => {
 
   const canBuildNextPlay = Boolean(editingPlayId);
   const buildNextPlayReason = editingPlayId ? '' : 'Save this play before starting a sequence.';
+  const currentSequenceRunIds = editingPlayId ? getSequenceRunIds(editingPlayId) : [];
+  const canRunSequence = currentSequenceRunIds.length > 1;
+  const runSequenceReason = !editingPlayId
+    ? 'Save this play before running a sequence.'
+    : currentSequenceRunIds.length <= 1
+      ? 'No linked next play found for this sequence.'
+      : '';
 
   return (
     <div className="flex flex-col h-screen bg-slate-950 text-slate-100 font-sans overflow-hidden">
@@ -1565,9 +1700,12 @@ const App: React.FC = () => {
           animationState={animationState}
           animationTime={animationTime}
           onStartAnimation={startAnimation}
+          onStartSequence={runSequenceFromCurrentPlay}
+          canStartSequence={canRunSequence}
+          startSequenceReason={runSequenceReason}
           onTogglePause={togglePause}
-          onStopAnimation={stopAnimation}
-          onResetAnimation={resetAnimation}
+          onStopAnimation={stopAnimationManually}
+          onResetAnimation={resetAnimationManually}
           hasPlayers={players.length > 0}
           description={playDescription}
           onUpdateDescription={setPlayDescription}
