@@ -214,14 +214,11 @@ const Field: React.FC<FieldProps> = ({
     return points[points.length - 1];
   };
 
-  const animationDebug = useMemo(() => {
+  const animatedPositions = useMemo(() => {
     const positions = new Map<string, Point>();
-    const chaseTargets = new Map<string, Point>();
-    const chasePaths = new Map<string, Point[]>();
-    const accelerationSamples = new Map<string, Array<{ x: number; y: number; ax: number; ay: number }>>();
     if (animationTime === null) {
       players.forEach((player) => positions.set(player.id, { x: player.x, y: player.y }));
-      return { positions, chaseTargets, chasePaths, accelerationSamples };
+      return positions;
     }
 
     const offensePlayers = players.filter((p) => p.team === 'offense');
@@ -273,9 +270,7 @@ const Field: React.FC<FieldProps> = ({
     const getDefenderTarget = (
       defender: Player,
       targetOffense: Player,
-      targetOffensePos: Point,
-      delayedDiscHolderPos: Point | undefined,
-      delayedDiscHolderId: string | undefined
+      targetOffensePos: Point
     ) => {
       const anchor = trackingOffsets.get(defender.id);
       const desiredFromAnchor = anchor && anchor.offenseId === targetOffense.id
@@ -307,32 +302,19 @@ const Field: React.FC<FieldProps> = ({
       let simY = player.y;
       let velX = 0;
       let velY = 0;
-      const targetTrail: Point[] = [];
-      let finalDesired: Point = { x: simX, y: simY };
-      let stepIndex = 0;
       let previousResponseDesired: Point | null = null;
       let previousDesiredDir: Point | null = null;
       let burstTimeRemaining = 0;
-      const accelTrail: Array<{ x: number; y: number; ax: number; ay: number }> = [];
-      let nextAccelSampleTime = 0.25;
 
       for (let t = dt; t <= animationTime + 1e-6; t += dt) {
-        const targetOffensePosNow = getOffensePositionAtTime(targetOffense, t);
         const responseTime = Math.max(0, t - REACTION_DELAY);
         const targetOffensePosResponse = getOffensePositionAtTime(targetOffense, responseTime);
         const discHolder = discHolderId ? offenseById.get(discHolderId) : undefined;
-        const discHolderPosNow = discHolder ? getOffensePositionAtTime(discHolder, t) : undefined;
         const discHolderPosResponse = discHolder ? getOffensePositionAtTime(discHolder, responseTime) : undefined;
-        const desiredNow = getDefenderTarget(player, targetOffense, targetOffensePosNow, discHolderPosNow, discHolder?.id);
-        const desiredResponse = getDefenderTarget(player, targetOffense, targetOffensePosResponse, discHolderPosResponse, discHolder?.id);
-        finalDesired = desiredNow;
+        const desiredResponse = getDefenderTarget(player, targetOffense, targetOffensePosResponse);
         const targetVelX = previousResponseDesired ? (desiredResponse.x - previousResponseDesired.x) / dt : 0;
         const targetVelY = previousResponseDesired ? (desiredResponse.y - previousResponseDesired.y) / dt : 0;
         previousResponseDesired = desiredResponse;
-        if (stepIndex % 4 === 0) {
-          targetTrail.push(desiredNow);
-        }
-        stepIndex += 1;
 
         const downfieldSign = discHolderPosResponse
           ? (Math.sign(targetOffensePosResponse.y - discHolderPosResponse.y) || -1)
@@ -391,8 +373,6 @@ const Field: React.FC<FieldProps> = ({
         const deltaVX = desiredVelX - velX;
         const deltaVY = desiredVelY - velY;
         const deltaV = Math.sqrt(deltaVX * deltaVX + deltaVY * deltaVY);
-        let appliedAX = 0;
-        let appliedAY = 0;
         if (deltaV > 1e-6) {
           const currentSpeed = Math.sqrt(velX * velX + velY * velY);
           const desiredSpeed = Math.sqrt(desiredVelX * desiredVelX + desiredVelY * desiredVelY);
@@ -407,8 +387,6 @@ const Field: React.FC<FieldProps> = ({
           const appliedDVY = deltaVY * scale;
           velX += appliedDVX;
           velY += appliedDVY;
-          appliedAX = appliedDVX / dt;
-          appliedAY = appliedDVY / dt;
         }
 
         const speed = Math.sqrt(velX * velX + velY * velY);
@@ -420,26 +398,15 @@ const Field: React.FC<FieldProps> = ({
 
         simX = Math.max(0, Math.min(FIELD_WIDTH, simX + velX * dt));
         simY = Math.max(0, Math.min(FIELD_HEIGHT, simY + velY * dt));
-        if (t + 1e-6 >= nextAccelSampleTime) {
-          accelTrail.push({ x: simX, y: simY, ax: appliedAX, ay: appliedAY });
-          nextAccelSampleTime += 0.25;
-        }
       }
 
       positions.set(player.id, { x: simX, y: simY });
-      chaseTargets.set(player.id, finalDesired);
-      if (targetTrail.length > 0) {
-        chasePaths.set(player.id, targetTrail);
-      }
-      if (accelTrail.length > 0) {
-        accelerationSamples.set(player.id, accelTrail);
-      }
     });
 
-    return { positions, chaseTargets, chasePaths, accelerationSamples };
+    return positions;
   }, [animationTime, players, defensiveAssignments, discHolderId, force]);
 
-  const getAnimatedPosition = (player: Player): Point => animationDebug.positions.get(player.id) ?? { x: player.x, y: player.y };
+  const getAnimatedPosition = (player: Player): Point => animatedPositions.get(player.id) ?? { x: player.x, y: player.y };
 
   const w = FIELD_WIDTH * SCALE, h = FIELD_HEIGHT * SCALE, ez = ENDZONE_DEPTH * SCALE;
   const handleDrop = (clientX: number, clientY: number, payload: string) => {
@@ -572,97 +539,6 @@ const Field: React.FC<FieldProps> = ({
               return pts.length > 1 && (
                 <g key={`path-${player.id}`}>
                   <polyline points={pts.map(p => `${p.x * SCALE},${p.y * SCALE}`).join(' ')} fill="none" stroke={player.team === 'offense' ? '#60a5fa' : '#f87171'} strokeWidth="2" strokeDasharray="4 2" opacity={animationTime ? "0.3" : "0.8"} />
-                </g>
-              );
-            })}
-            {isAnimationActive && players.filter((p) => p.team === 'defense').map((player) => {
-              const chasePath = animationDebug.chasePaths.get(player.id);
-              const chaseTarget = animationDebug.chaseTargets.get(player.id);
-              const accelSamples = animationDebug.accelerationSamples.get(player.id) || [];
-              if (!chaseTarget) return null;
-              return (
-                <g key={`chase-debug-${player.id}`} pointerEvents="none">
-                  {chasePath && chasePath.length > 1 && (
-                    <polyline
-                      points={chasePath.map((p) => `${p.x * SCALE},${p.y * SCALE}`).join(' ')}
-                      fill="none"
-                      stroke="#f59e0b"
-                      strokeWidth="2"
-                      strokeDasharray="3 3"
-                      opacity="0.95"
-                    />
-                  )}
-                  <circle
-                    cx={chaseTarget.x * SCALE}
-                    cy={chaseTarget.y * SCALE}
-                    r={0.5 * SCALE}
-                    fill="none"
-                    stroke="#facc15"
-                    strokeWidth="2"
-                  />
-                  <line
-                    x1={(chaseTarget.x - 0.35) * SCALE}
-                    y1={chaseTarget.y * SCALE}
-                    x2={(chaseTarget.x + 0.35) * SCALE}
-                    y2={chaseTarget.y * SCALE}
-                    stroke="#facc15"
-                    strokeWidth="2"
-                  />
-                  <line
-                    x1={chaseTarget.x * SCALE}
-                    y1={(chaseTarget.y - 0.35) * SCALE}
-                    x2={chaseTarget.x * SCALE}
-                    y2={(chaseTarget.y + 0.35) * SCALE}
-                    stroke="#facc15"
-                    strokeWidth="2"
-                  />
-                  {accelSamples.map((sample, idx) => {
-                    const aMag = Math.sqrt(sample.ax * sample.ax + sample.ay * sample.ay);
-                    if (aMag < 1e-4) return null;
-                    const unitX = sample.ax / aMag;
-                    const unitY = sample.ay / aMag;
-                    const lengthYards = Math.min(1.2, 0.35 + aMag * 0.08);
-                    const startX = sample.x * SCALE;
-                    const startY = sample.y * SCALE;
-                    const endX = (sample.x + unitX * lengthYards) * SCALE;
-                    const endY = (sample.y + unitY * lengthYards) * SCALE;
-                    const arrowBackX = endX - unitX * (0.22 * SCALE);
-                    const arrowBackY = endY - unitY * (0.22 * SCALE);
-                    const perpX = -unitY;
-                    const perpY = unitX;
-                    const wing = 0.09 * SCALE;
-                    return (
-                      <g key={`accel-${player.id}-${idx}`}>
-                        <line
-                          x1={startX}
-                          y1={startY}
-                          x2={endX}
-                          y2={endY}
-                          stroke="#fb7185"
-                          strokeWidth="2"
-                          opacity="0.95"
-                        />
-                        <line
-                          x1={endX}
-                          y1={endY}
-                          x2={arrowBackX + perpX * wing}
-                          y2={arrowBackY + perpY * wing}
-                          stroke="#fb7185"
-                          strokeWidth="2"
-                          opacity="0.95"
-                        />
-                        <line
-                          x1={endX}
-                          y1={endY}
-                          x2={arrowBackX - perpX * wing}
-                          y2={arrowBackY - perpY * wing}
-                          stroke="#fb7185"
-                          strokeWidth="2"
-                          opacity="0.95"
-                        />
-                      </g>
-                    );
-                  })}
                 </g>
               );
             })}
