@@ -970,6 +970,7 @@ const App: React.FC = () => {
 
   const stopAnimation = () => {
     setAnimationState('IDLE');
+    setAnimationTime(0);
     if (animationRef.current) cancelAnimationFrame(animationRef.current);
   };
 
@@ -988,12 +989,13 @@ const App: React.FC = () => {
       if (discState.turnoverTime && nextTime >= discState.turnoverTime) {
         setAnimationState('IDLE');
         if (animationRef.current) cancelAnimationFrame(animationRef.current);
-        return discState.turnoverTime;
+        return prev;
       }
-      if (maxPlayDuration > 0 && nextTime >= maxPlayDuration + 1) {
+      const finalPlaybackTime = maxPlayDuration + 1;
+      if (maxPlayDuration > 0 && nextTime >= finalPlaybackTime) {
         setAnimationState('IDLE');
         if (animationRef.current) cancelAnimationFrame(animationRef.current);
-        return maxPlayDuration;
+        return prev;
       }
       return nextTime;
     });

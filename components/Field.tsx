@@ -102,7 +102,23 @@ const Field: React.FC<FieldProps> = ({
     const target = e.target as SVGElement;
     const playerId = target.closest('[data-player-id]')?.getAttribute('data-player-id');
     if (playerId) {
-      onSelectPlayer(playerId);
+      let intendedPlayerId = playerId;
+      const clickedPlayer = players.find((p) => p.id === playerId);
+      const shouldPreferOffense =
+        clickedPlayer?.team === 'defense' &&
+        (mode === InteractionMode.DRAW || mode === InteractionMode.SELECT || mode === InteractionMode.ADD_OFFENSE);
+      if (shouldPreferOffense) {
+        const nearbyOffense = players
+          .filter((p) => p.team === 'offense')
+          .map((p) => ({ player: p, dist: Math.hypot(p.x - coords.x, p.y - coords.y) }))
+          .filter(({ dist }) => dist <= 1.35)
+          .sort((a, b) => a.dist - b.dist)[0];
+        if (nearbyOffense) {
+          intendedPlayerId = nearbyOffense.player.id;
+        }
+      }
+
+      onSelectPlayer(intendedPlayerId);
       if (
         !isStartLocked &&
         (mode === InteractionMode.SELECT ||
@@ -111,7 +127,7 @@ const Field: React.FC<FieldProps> = ({
           mode === InteractionMode.DRAW)
       ) {
         setIsDragging(true);
-        setActivePlayerId(playerId);
+        setActivePlayerId(intendedPlayerId);
       }
     } else {
       onFieldClick(coords.x, coords.y);
@@ -214,11 +230,13 @@ const Field: React.FC<FieldProps> = ({
     return points[points.length - 1];
   };
 
-  const animatedPositions = useMemo(() => {
+  const animationDebug = useMemo(() => {
     const positions = new Map<string, Point>();
+    const chaseTargets = new Map<string, Point>();
+    const chasePaths = new Map<string, Point[]>();
     if (animationTime === null) {
       players.forEach((player) => positions.set(player.id, { x: player.x, y: player.y }));
-      return positions;
+      return { positions, chaseTargets, chasePaths };
     }
 
     const offensePlayers = players.filter((p) => p.team === 'offense');
@@ -270,16 +288,65 @@ const Field: React.FC<FieldProps> = ({
     const getDefenderTarget = (
       defender: Player,
       targetOffense: Player,
-      targetOffensePos: Point
+      targetOffensePos: Point,
+      currentDiscHolderId?: string
     ) => {
       const anchor = trackingOffsets.get(defender.id);
       const desiredFromAnchor = anchor && anchor.offenseId === targetOffense.id
         ? { x: targetOffensePos.x + anchor.dx, y: targetOffensePos.y + anchor.dy }
         : { x: targetOffensePos.x, y: targetOffensePos.y };
+
+      if (currentDiscHolderId && targetOffense.id === currentDiscHolderId) {
+        const markSideSign = -Math.sign(getForceXOffset(targetOffensePos.x, force)) || 1;
+        const MARK_FORCE_OFFSET = 2.2;
+        const MARK_BACK_OFFSET = 0.8;
+        const MIN_MARK_DISTANCE = 2.35;
+        let base = desiredFromAnchor;
+        const lateral = (base.x - targetOffensePos.x) * markSideSign;
+        if (lateral < 0.2) {
+          base = {
+            x: targetOffensePos.x + markSideSign * MARK_FORCE_OFFSET,
+            y: targetOffensePos.y - MARK_BACK_OFFSET
+          };
+        }
+        const dx = base.x - targetOffensePos.x;
+        const dy = base.y - targetOffensePos.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 1e-4) {
+          return { x: targetOffensePos.x + markSideSign * MIN_MARK_DISTANCE, y: targetOffensePos.y };
+        }
+        if (dist < MIN_MARK_DISTANCE) {
+          const s = MIN_MARK_DISTANCE / dist;
+          return { x: targetOffensePos.x + dx * s, y: targetOffensePos.y + dy * s };
+        }
+        return base;
+      }
       return {
         x: desiredFromAnchor.x,
         y: desiredFromAnchor.y
       };
+    };
+
+    const normalizeAngle = (angle: number) => {
+      let a = angle;
+      while (a <= -Math.PI) a += Math.PI * 2;
+      while (a > Math.PI) a -= Math.PI * 2;
+      return a;
+    };
+
+    const segmentIntersectsCircle = (x1: number, y1: number, x2: number, y2: number, cx: number, cy: number, radius: number) => {
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq === 0) {
+        const dist = Math.hypot(x1 - cx, y1 - cy);
+        return dist <= radius;
+      }
+      const t = Math.max(0, Math.min(1, ((cx - x1) * dx + (cy - y1) * dy) / lenSq));
+      const closestX = x1 + t * dx;
+      const closestY = y1 + t * dy;
+      const dist = Math.hypot(closestX - cx, closestY - cy);
+      return dist <= radius;
     };
 
     players.forEach((player) => {
@@ -302,19 +369,69 @@ const Field: React.FC<FieldProps> = ({
       let simY = player.y;
       let velX = 0;
       let velY = 0;
+      const targetTrail: Point[] = [];
+      let finalDesired: Point = { x: simX, y: simY };
+      let stepIndex = 0;
       let previousResponseDesired: Point | null = null;
       let previousDesiredDir: Point | null = null;
       let burstTimeRemaining = 0;
 
       for (let t = dt; t <= animationTime + 1e-6; t += dt) {
+        const targetOffensePosNow = getOffensePositionAtTime(targetOffense, t);
         const responseTime = Math.max(0, t - REACTION_DELAY);
         const targetOffensePosResponse = getOffensePositionAtTime(targetOffense, responseTime);
         const discHolder = discHolderId ? offenseById.get(discHolderId) : undefined;
         const discHolderPosResponse = discHolder ? getOffensePositionAtTime(discHolder, responseTime) : undefined;
-        const desiredResponse = getDefenderTarget(player, targetOffense, targetOffensePosResponse);
-        const targetVelX = previousResponseDesired ? (desiredResponse.x - previousResponseDesired.x) / dt : 0;
-        const targetVelY = previousResponseDesired ? (desiredResponse.y - previousResponseDesired.y) / dt : 0;
-        previousResponseDesired = desiredResponse;
+        const desiredNow = getDefenderTarget(player, targetOffense, targetOffensePosNow, discHolder?.id);
+        const desiredResponse = getDefenderTarget(player, targetOffense, targetOffensePosResponse, discHolder?.id);
+        finalDesired = desiredNow;
+        if (stepIndex % 4 === 0) {
+          targetTrail.push(desiredNow);
+        }
+        stepIndex += 1;
+
+        let steeringTarget = desiredResponse;
+        const isMarkingDiscHolder = Boolean(discHolder && targetOffense.id === discHolder.id);
+        if (isMarkingDiscHolder) {
+          const BODY_AVOID_RADIUS = 1.0;
+          const MARK_AVOID_RADIUS = 2.5;
+          const MIN_MARK_DISTANCE = 2.35;
+          const shouldAvoid = segmentIntersectsCircle(
+            simX,
+            simY,
+            desiredResponse.x,
+            desiredResponse.y,
+            targetOffensePosResponse.x,
+            targetOffensePosResponse.y,
+            BODY_AVOID_RADIUS
+          );
+          if (shouldAvoid) {
+            const fromAngle = Math.atan2(simY - targetOffensePosResponse.y, simX - targetOffensePosResponse.x);
+            const toAngle = Math.atan2(desiredResponse.y - targetOffensePosResponse.y, desiredResponse.x - targetOffensePosResponse.x);
+            const delta = normalizeAngle(toAngle - fromAngle);
+            const side = delta >= 0 ? 1 : -1;
+            const arcStep = side * (Math.PI / 3);
+            const waypointAngle = fromAngle + arcStep;
+            steeringTarget = {
+              x: targetOffensePosResponse.x + Math.cos(waypointAngle) * MARK_AVOID_RADIUS,
+              y: targetOffensePosResponse.y + Math.sin(waypointAngle) * MARK_AVOID_RADIUS
+            };
+          }
+          const mdx = steeringTarget.x - targetOffensePosResponse.x;
+          const mdy = steeringTarget.y - targetOffensePosResponse.y;
+          const md = Math.hypot(mdx, mdy);
+          if (md > 1e-4 && md < MIN_MARK_DISTANCE) {
+            const s = MIN_MARK_DISTANCE / md;
+            steeringTarget = {
+              x: targetOffensePosResponse.x + mdx * s,
+              y: targetOffensePosResponse.y + mdy * s
+            };
+          }
+        }
+
+        const targetVelX = previousResponseDesired ? (steeringTarget.x - previousResponseDesired.x) / dt : 0;
+        const targetVelY = previousResponseDesired ? (steeringTarget.y - previousResponseDesired.y) / dt : 0;
+        previousResponseDesired = steeringTarget;
 
         const downfieldSign = discHolderPosResponse
           ? (Math.sign(targetOffensePosResponse.y - discHolderPosResponse.y) || -1)
@@ -327,13 +444,20 @@ const Field: React.FC<FieldProps> = ({
         const maxSpeed = (needsDeepRecovery ? maxSpeedBase * 1.35 : maxSpeedBase) * burstSpeedMultiplier;
         const maxAccel = (needsDeepRecovery ? maxAccelBase * 1.6 : maxAccelBase) * burstAccelMultiplier;
 
-        const toTargetX = desiredResponse.x - simX;
-        const toTargetY = desiredResponse.y - simY;
+        const toTargetX = steeringTarget.x - simX;
+        const toTargetY = steeringTarget.y - simY;
         const toTargetDist = Math.sqrt(toTargetX * toTargetX + toTargetY * toTargetY);
         const targetSpeedMag = Math.sqrt(targetVelX * targetVelX + targetVelY * targetVelY);
+        if (isMarkingDiscHolder && toTargetDist <= 0.25 && targetSpeedMag < 0.2) {
+          simX = steeringTarget.x;
+          simY = steeringTarget.y;
+          velX = 0;
+          velY = 0;
+          continue;
+        }
         if (toTargetDist <= 0.03 && targetSpeedMag < 0.05) {
-          simX = desiredResponse.x;
-          simY = desiredResponse.y;
+          simX = steeringTarget.x;
+          simY = steeringTarget.y;
           velX = 0;
           velY = 0;
           continue;
@@ -401,12 +525,16 @@ const Field: React.FC<FieldProps> = ({
       }
 
       positions.set(player.id, { x: simX, y: simY });
+      chaseTargets.set(player.id, finalDesired);
+      if (targetTrail.length > 0) {
+        chasePaths.set(player.id, targetTrail);
+      }
     });
 
-    return positions;
+    return { positions, chaseTargets, chasePaths };
   }, [animationTime, players, defensiveAssignments, discHolderId, force]);
 
-  const getAnimatedPosition = (player: Player): Point => animatedPositions.get(player.id) ?? { x: player.x, y: player.y };
+  const getAnimatedPosition = (player: Player): Point => animationDebug.positions.get(player.id) ?? { x: player.x, y: player.y };
 
   const w = FIELD_WIDTH * SCALE, h = FIELD_HEIGHT * SCALE, ez = ENDZONE_DEPTH * SCALE;
   const handleDrop = (clientX: number, clientY: number, payload: string) => {
@@ -542,12 +670,55 @@ const Field: React.FC<FieldProps> = ({
                 </g>
               );
             })}
+            {isAnimationActive && players.filter((p) => p.team === 'defense').map((player) => {
+              const chasePath = animationDebug.chasePaths.get(player.id);
+              const chaseTarget = animationDebug.chaseTargets.get(player.id);
+              if (!chaseTarget) return null;
+              return (
+                <g key={`chase-debug-${player.id}`} pointerEvents="none">
+                  {chasePath && chasePath.length > 1 && (
+                    <polyline
+                      points={chasePath.map((p) => `${p.x * SCALE},${p.y * SCALE}`).join(' ')}
+                      fill="none"
+                      stroke="#f59e0b"
+                      strokeWidth="2"
+                      strokeDasharray="3 3"
+                      opacity="0.95"
+                    />
+                  )}
+                  <circle
+                    cx={chaseTarget.x * SCALE}
+                    cy={chaseTarget.y * SCALE}
+                    r={0.5 * SCALE}
+                    fill="none"
+                    stroke="#facc15"
+                    strokeWidth="2"
+                  />
+                  <line
+                    x1={(chaseTarget.x - 0.35) * SCALE}
+                    y1={chaseTarget.y * SCALE}
+                    x2={(chaseTarget.x + 0.35) * SCALE}
+                    y2={chaseTarget.y * SCALE}
+                    stroke="#facc15"
+                    strokeWidth="2"
+                  />
+                  <line
+                    x1={chaseTarget.x * SCALE}
+                    y1={(chaseTarget.y - 0.35) * SCALE}
+                    x2={chaseTarget.x * SCALE}
+                    y2={(chaseTarget.y + 0.35) * SCALE}
+                    stroke="#facc15"
+                    strokeWidth="2"
+                  />
+                </g>
+              );
+            })}
             {players.map(player => {
               const pos = getAnimatedPosition(player);
               const isHighlighted = highlightPlayerId === player.id;
               return (
                 <g key={player.id} data-player-id={player.id} transform={`translate(${pos.x * SCALE}, ${pos.y * SCALE})`} className="cursor-pointer group" draggable={false}>
-                  <circle cx="0" cy="0" r={1.2 * SCALE} fill={player.team === 'offense' ? '#2563eb' : '#dc2626'} stroke={selectedPlayerId === player.id && !animationTime ? 'white' : isHighlighted ? '#34d399' : 'rgba(255,255,255,0.2)'} strokeWidth={selectedPlayerId === player.id && !animationTime ? "3" : isHighlighted ? "3" : "1"} />
+                  <circle cx="0" cy="0" r={1.2 * SCALE} fill={player.team === 'offense' ? '#2563eb' : '#dc2626'} stroke={selectedPlayerId === player.id ? 'white' : isHighlighted ? '#34d399' : 'rgba(255,255,255,0.2)'} strokeWidth={selectedPlayerId === player.id ? "3" : isHighlighted ? "3" : "1"} />
                   {(discHolderId ? discHolderId === player.id : player.hasDisc) && !discFlight && (
                     <g transform={`translate(${1.2 * SCALE}, ${-1.2 * SCALE})`}>
                       <circle r={0.6 * SCALE} fill="#f8fafc" stroke="#94a3b8" strokeWidth="1" />
