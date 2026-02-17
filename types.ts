@@ -39,6 +39,8 @@ export interface Play {
   id: string;
   ownerId?: string;
   name: string;
+  conceptId?: string;
+  conceptName?: string;
   players: Player[];
   force: Force;
   description: string;
@@ -52,20 +54,6 @@ export interface Play {
   sourcePlayId?: string;
   startFromPlayId?: string;
   startLocked?: boolean;
-}
-
-export interface Formation {
-  id: string;
-  ownerId?: string;
-  name: string;
-  players: Player[];
-  visibility?: 'private' | 'team' | 'public';
-  sharedTeamIds?: string[];
-  createdAt?: unknown;
-  updatedAt?: unknown;
-  createdBy?: string;
-  lastEditedBy?: string;
-  sourceFormationId?: string;
 }
 
 export interface TeamInfo {

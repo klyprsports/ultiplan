@@ -321,14 +321,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">Route Start</label>
-                    <span className="text-xs font-mono text-indigo-400 font-bold">{(selectedPlayer.pathStartOffset ?? 0).toFixed(1)}s</span>
+                    <span className="text-xs font-mono text-indigo-400 font-bold">{Math.max(0, selectedPlayer.pathStartOffset ?? 0).toFixed(1)}s</span>
                   </div>
                   <input
                     type="range"
-                    min="-2"
+                    min="0"
                     max="4"
                     step="0.1"
-                    value={selectedPlayer.pathStartOffset ?? 0}
+                    value={Math.max(0, selectedPlayer.pathStartOffset ?? 0)}
                     onChange={(e) => onUpdatePathStartOffset?.(selectedPlayer.id, parseFloat(e.target.value))}
                     disabled={isPlaying}
                     className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500"

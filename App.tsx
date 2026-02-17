@@ -8,10 +8,10 @@ import WorkflowSidebar from './components/WorkflowSidebar';
 import AccountModal from './components/AccountModal';
 import AuthModal from './components/AuthModal';
 import ShareModal from './components/ShareModal';
-import { Player, InteractionMode, Play, Team, Point, Force, Formation } from './types';
-import { loadPlaysFromStorage, savePlaysToStorage, loadFormationsFromStorage, saveFormationsToStorage, normalizeFormationPlayers, normalizePlay, loadPendingSelection, clearPendingSelection, setPendingManageTeams, clearPlaybookStorage, hasSeenOnboarding, setSeenOnboarding, consumePendingTour } from './services/storage';
+import { Player, InteractionMode, Play, Team, Point, Force } from './types';
+import { loadPlaysFromStorage, savePlaysToStorage, normalizePlay, loadPendingSelection, clearPendingSelection, setPendingManageTeams, clearPlaybookStorage, hasSeenOnboarding, setSeenOnboarding, consumePendingTour, consumePendingConceptDraft } from './services/storage';
 import { signInWithGoogle, getCurrentUser, subscribeToAuth, deleteCurrentUser } from './services/auth';
-import { isFirestoreEnabled, ensureUserDocument, fetchFormationsForUser, fetchPlaysForUser, fetchTeamsForUser, savePlayToFirestore, saveFormationToFirestore, deleteAccountData } from './services/firestore';
+import { isFirestoreEnabled, ensureUserDocument, fetchPlaysForUser, fetchTeamsForUser, savePlayToFirestore, deleteAccountData } from './services/firestore';
 import { DEFAULT_SPEED, DEFAULT_ACCELERATION, MAX_PLAYERS_PER_TEAM, FIELD_WIDTH, buildPresetFormation, getDumpOffsetX } from './services/formations';
 import OnboardingIntroModal from './components/OnboardingIntroModal';
 import OnboardingTour, { OnboardingStep } from './components/OnboardingTour';
@@ -34,7 +34,6 @@ const App: React.FC = () => {
   const [playName, setPlayName] = useState('New Play');
   const [playDescription, setPlayDescription] = useState('');
   const [savedPlays, setSavedPlays] = useState<Play[]>([]);
-  const [savedFormations, setSavedFormations] = useState<Formation[]>([]);
   const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [draggingToken, setDraggingToken] = useState<{ team: 'offense' | 'defense'; labelNum: number } | null>(null);
@@ -59,13 +58,10 @@ const App: React.FC = () => {
   const [tempPlayName, setTempPlayName] = useState('');
   const [tempSavePlayName, setTempSavePlayName] = useState('');
   const [activeFormation, setActiveFormation] = useState<'vertical' | 'side' | 'ho' | 'custom' | null>(null);
-  const [showSaveFormationModal, setShowSaveFormationModal] = useState(false);
-  const [tempFormationName, setTempFormationName] = useState('');
-  const [formationNameError, setFormationNameError] = useState<string | null>(null);
   const [playbookLoaded, setPlaybookLoaded] = useState(false);
   const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [pendingSaveAction, setPendingSaveAction] = useState<null | { type: 'play'; name?: string } | { type: 'formation' }>(null);
+  const [pendingSaveAction, setPendingSaveAction] = useState<null | { type: 'play'; name?: string }>(null);
   const [authUser, setAuthUser] = useState<ReturnType<typeof getCurrentUser>>(getCurrentUser());
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
@@ -79,11 +75,11 @@ const App: React.FC = () => {
   const [playOwnerId, setPlayOwnerId] = useState<string | null>(null);
   const [playCreatedBy, setPlayCreatedBy] = useState<string | null>(null);
   const [playSourceId, setPlaySourceId] = useState<string | null>(null);
+  const [playConceptId, setPlayConceptId] = useState<string | null>(null);
+  const [playConceptName, setPlayConceptName] = useState('');
+  const [newPlayConceptName, setNewPlayConceptName] = useState<string | null>(null);
   const [startFromPlayId, setStartFromPlayId] = useState<string | null>(null);
   const [startLocked, setStartLocked] = useState(false);
-  const [formationOwnerId, setFormationOwnerId] = useState<string | null>(null);
-  const [formationCreatedBy, setFormationCreatedBy] = useState<string | null>(null);
-  const [formationSourceId, setFormationSourceId] = useState<string | null>(null);
 
   const isAnimationActive = animationState !== 'IDLE';
 
@@ -99,16 +95,11 @@ const App: React.FC = () => {
 
   useEffect(() => {
     setSavedPlays(loadPlaysFromStorage());
-    setSavedFormations(loadFormationsFromStorage());
   }, [authUser?.uid]);
 
   useEffect(() => {
     savePlaysToStorage(savedPlays);
   }, [savedPlays]);
-
-  useEffect(() => {
-    saveFormationsToStorage(savedFormations);
-  }, [savedFormations]);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,23 +117,17 @@ const App: React.FC = () => {
         const remoteTeams = await fetchTeamsForUser();
         if (cancelled) return;
         const teamIds = remoteTeams.map((team) => team.id);
-        const [remotePlays, remoteFormations] = await Promise.all([
-          fetchPlaysForUser(teamIds),
-          fetchFormationsForUser(teamIds)
-        ]);
+        const remotePlays = await fetchPlaysForUser(teamIds);
         if (cancelled) return;
-        if (remotePlays.length > 0 || remoteFormations.length > 0) {
+        if (remotePlays.length > 0) {
           setSavedPlays(remotePlays);
-          setSavedFormations(remoteFormations);
         } else {
           const localPlays = loadPlaysFromStorage();
-          const localFormations = loadFormationsFromStorage();
-          if (localPlays.length > 0 || localFormations.length > 0) {
+          if (localPlays.length > 0) {
             const uid = getCurrentUser()?.uid;
-            await Promise.all([
-              ...localPlays.map((play) => savePlayToFirestore({ ...play, ownerId: play.ownerId || uid, visibility: play.visibility || 'private', sharedTeamIds: play.sharedTeamIds || [] })), 
-              ...localFormations.map((formation) => saveFormationToFirestore({ ...formation, ownerId: formation.ownerId || uid, visibility: formation.visibility || 'private', sharedTeamIds: formation.sharedTeamIds || [] }))
-            ]);
+            await Promise.all(
+              localPlays.map((play) => savePlayToFirestore({ ...play, ownerId: play.ownerId || uid, visibility: play.visibility || 'private', sharedTeamIds: play.sharedTeamIds || [] }))
+            );
           }
         }
       } catch (error) {
@@ -189,7 +174,6 @@ const App: React.FC = () => {
       }
       clearPlaybookStorage();
       setSavedPlays([]);
-      setSavedFormations([]);
       await deleteCurrentUser();
       setShowAccountModal(false);
     } catch (error) {
@@ -226,7 +210,7 @@ const App: React.FC = () => {
     {
       id: 'add-players',
       title: 'Add offense',
-      body: 'Drag an offensive player token to the field or pick a formation.',
+      body: 'Drag an offensive player token to the field or pick a starting setup.',
       target: '[data-tour-id="workflow-offense"]'
     },
     {
@@ -276,12 +260,6 @@ const App: React.FC = () => {
       title: 'Run the play',
       body: 'Animate your play to see the timing and spacing.',
       target: '[data-tour-id="run-button"]'
-    },
-    {
-      id: 'save-formation',
-      title: 'Save the formation',
-      body: 'Save a reusable formation before you finish the full play.',
-      target: '[data-tour-id="workflow-save-formation"]'
     },
     {
       id: 'save',
@@ -344,7 +322,10 @@ const App: React.FC = () => {
     const pending = loadPendingSelection();
     if (!pending) return;
     if (pending.type === 'new-play') {
-      setTempPlayName('');
+      const conceptName = consumePendingConceptDraft();
+      const trimmedConcept = conceptName?.trim() || '';
+      setTempPlayName(trimmedConcept);
+      setNewPlayConceptName(trimmedConcept || null);
       setShowNewPlayModal(true);
       clearPendingSelection();
       return;
@@ -357,18 +338,10 @@ const App: React.FC = () => {
         return;
       }
     }
-    if (pending.type === 'formation') {
-      const formation = savedFormations.find(f => f.id === pending.id);
-      if (formation) {
-        loadFormation(formation);
-        clearPendingSelection();
-        return;
-      }
-    }
     if (playbookLoaded) {
       clearPendingSelection();
     }
-  }, [savedPlays, savedFormations, playbookLoaded]);
+  }, [savedPlays, playbookLoaded]);
 
   const computeBasePlayDuration = useCallback((playPlayers: Player[]) => {
     let maxDur = 0;
@@ -401,7 +374,7 @@ const App: React.FC = () => {
   }, []);
 
   const calculatePositionAtTime = useCallback((player: Player, time: number): Point => {
-    const startOffset = player.team === 'offense' ? (player.pathStartOffset ?? 0) : 0;
+    const startOffset = player.team === 'offense' ? Math.max(0, player.pathStartOffset ?? 0) : 0;
     const adjustedTime = time - startOffset;
     if (player.path.length === 0 || adjustedTime <= 0) return { x: player.x, y: player.y };
     const acc = player.acceleration;
@@ -467,7 +440,7 @@ const App: React.FC = () => {
     return points[points.length - 1];
   }, []);
 
-  const REACTION_DELAY = 0.25;
+  const REACTION_DELAY = 0.1;
 
   const computeThrowPlansForPlay = useCallback((playPlayers: Player[], playThrows: Play['throws'] = []) => {
     const discOffset = { x: 1.2, y: -1.2 };
@@ -520,9 +493,11 @@ const App: React.FC = () => {
     return holderId;
   }, [computeThrowPlansForPlay]);
 
-  const getEndPositionsByLabel = useCallback((playPlayers: Player[], playThrows: Play['throws'] = []) => {
-    const endTime = computeMaxPlayDurationForPlay(playPlayers, playThrows);
-    const holderId = getDiscHolderForPlay(playPlayers, playThrows, endTime);
+  const getSequenceAnchorPositionsByLabel = useCallback((playPlayers: Player[], playThrows: Play['throws'] = []) => {
+    const throwPlansForPlay = computeThrowPlansForPlay(playPlayers, playThrows);
+    const maxThrowEnd = throwPlansForPlay.reduce((acc, plan) => Math.max(acc, plan.endTime), 0);
+    const anchorTime = maxThrowEnd > 0 ? maxThrowEnd : computeMaxPlayDurationForPlay(playPlayers, playThrows);
+    const holderId = getDiscHolderForPlay(playPlayers, playThrows, anchorTime);
     const defense = playPlayers.filter((p) => p.team === 'defense');
     const offense = playPlayers.filter((p) => p.team === 'offense');
     const defensiveAssignments = new Map<string, string>();
@@ -542,12 +517,12 @@ const App: React.FC = () => {
     });
     const endPositions = new Map<string, { x: number; y: number; hasDisc: boolean }>();
     playPlayers.forEach((player) => {
-      let pos = calculatePositionAtTime(player, endTime);
+      let pos = calculatePositionAtTime(player, anchorTime);
       if (player.team === 'defense') {
         const targetId = defensiveAssignments.get(player.id);
         const targetOffense = playPlayers.find((p) => p.id === targetId);
         if (targetOffense) {
-          const delayedTime = Math.max(0, endTime - REACTION_DELAY);
+          const delayedTime = Math.max(0, anchorTime - REACTION_DELAY);
           const targetPosAtDelayedTime = calculatePositionAtTime(targetOffense, delayedTime);
           pos = {
             x: player.x + (targetPosAtDelayedTime.x - targetOffense.x),
@@ -559,24 +534,31 @@ const App: React.FC = () => {
       endPositions.set(key, { x: pos.x, y: pos.y, hasDisc: player.id === holderId });
     });
     return endPositions;
-  }, [calculatePositionAtTime, computeMaxPlayDurationForPlay, getDiscHolderForPlay]);
+  }, [calculatePositionAtTime, computeThrowPlansForPlay, computeMaxPlayDurationForPlay, getDiscHolderForPlay]);
 
   const alignPlayersToEndState = useCallback((currentPlayers: Player[], endPositions: Map<string, { x: number; y: number; hasDisc: boolean }>) => {
     let changed = false;
     const aligned = currentPlayers.map((player) => {
+      const shouldClearDefenderAssignment = player.team === 'defense' && (player.autoAssigned || player.coversOffenseId);
+      const basePlayer = shouldClearDefenderAssignment
+        ? { ...player, autoAssigned: false, coversOffenseId: undefined }
+        : player;
+      if (shouldClearDefenderAssignment) {
+        changed = true;
+      }
       const key = `${player.team}:${player.label}`;
       const target = endPositions.get(key);
-      if (!target) return player;
-      const dx = target.x - player.x;
-      const dy = target.y - player.y;
+      if (!target) return basePlayer;
+      const dx = target.x - basePlayer.x;
+      const dy = target.y - basePlayer.y;
       const nextPath = (dx === 0 && dy === 0)
-        ? player.path
-        : player.path.map((pt) => ({ x: pt.x + dx, y: pt.y + dy }));
-      if (dx !== 0 || dy !== 0 || player.hasDisc !== target.hasDisc) {
+        ? basePlayer.path
+        : basePlayer.path.map((pt) => ({ x: pt.x + dx, y: pt.y + dy }));
+      if (dx !== 0 || dy !== 0 || basePlayer.hasDisc !== target.hasDisc) {
         changed = true;
-        return { ...player, x: target.x, y: target.y, path: nextPath, hasDisc: target.hasDisc };
+        return { ...basePlayer, x: target.x, y: target.y, path: nextPath, hasDisc: target.hasDisc };
       }
-      return player;
+      return basePlayer;
     });
     return { players: aligned, changed };
   }, []);
@@ -776,7 +758,7 @@ const App: React.FC = () => {
     setPlayers(prev => prev.map(p => {
       if (p.id !== id) return p;
       if (p.team !== 'offense') return p;
-      return { ...p, pathStartOffset: offset };
+      return { ...p, pathStartOffset: Math.max(0, offset) };
     }));
   };
 
@@ -818,6 +800,7 @@ const App: React.FC = () => {
 
   const computeDefenderPosition = useCallback((op: Player, discHolder: Player | undefined, currentForce: Force, defender?: Player) => {
     const role = op.role ?? 'cutter';
+    const defaultDownfieldSign = -1;
     const clampToTwoPointFiveYards = (x: number, y: number) => {
       const dx = x - op.x;
       const dy = y - op.y;
@@ -840,7 +823,13 @@ const App: React.FC = () => {
         op.y + dy * 0.25 - 3
       );
     }
-    const cutterDepth = defender?.cutterDefense === 'deep' ? -3 : 3;
+    const downfieldSign = discHolder
+      ? (Math.sign(op.y - discHolder.y) || defaultDownfieldSign)
+      : defaultDownfieldSign;
+    const wantsDeep = defender?.cutterDefense === 'deep';
+    const deepDepth = 4;
+    const underDepth = 3;
+    const cutterDepth = (wantsDeep ? deepDepth : -underDepth) * downfieldSign;
     return clampToTwoPointFiveYards(
       op.x + getForceXOffset(op, currentForce),
       op.y + cutterDepth
@@ -1025,17 +1014,6 @@ const App: React.FC = () => {
   };
 
   // PERSISTENCE
-  const buildFormationPlayers = () => {
-    return players.map(p => ({
-      ...p,
-      path: [],
-      pathStartOffset: 0,
-      hasDisc: p.team === 'offense' ? !!p.hasDisc : false,
-      autoAssigned: false,
-      coversOffenseId: undefined
-    }));
-  };
-
   const savePlay = (overrideName?: string) => {
     const finalName = (overrideName ?? playName).trim();
     if (finalName.toLowerCase() === 'new play') {
@@ -1052,11 +1030,15 @@ const App: React.FC = () => {
     const existing = savedPlays.find((p) => p.id === editingPlayId);
     const visibility = existing?.visibility || 'private';
     const sharedTeamIds = existing?.sharedTeamIds || [];
+    const conceptId = existing?.conceptId || playConceptId || undefined;
+    const conceptName = (existing?.conceptName || playConceptName || '').trim() || undefined;
     setSaveStatus('saving');
     const newPlay: Play = {
       id: editingPlayId || generateId(),
       ownerId: playOwnerId || currentUser?.uid,
       name: finalName,
+      conceptId,
+      conceptName,
       players,
       force,
       description: playDescription,
@@ -1083,6 +1065,8 @@ const App: React.FC = () => {
     setPlayOwnerId(newPlay.ownerId || null);
     setPlayCreatedBy(newPlay.createdBy || null);
     setPlaySourceId(newPlay.sourcePlayId || null);
+    setPlayConceptId(newPlay.conceptId || null);
+    setPlayConceptName(newPlay.conceptName || '');
     if (isFirestoreEnabled()) {
       savePlayToFirestore(newPlay).catch((error) => console.error('Failed to save play to Firestore', error));
     }
@@ -1095,22 +1079,26 @@ const App: React.FC = () => {
   const buildNextPlayInSequence = () => {
     if (!editingPlayId) return;
     const currentUser = getCurrentUser();
-    const endPositions = getEndPositionsByLabel(players, throws || []);
+    const endPositions = getSequenceAnchorPositionsByLabel(players, throws || []);
     const nextPlayers = players.map((player) => {
       const key = `${player.team}:${player.label}`;
       const target = endPositions.get(key);
       if (!target) {
-        return { ...player, path: [], pathStartOffset: 0, hasDisc: false };
+        return { ...player, path: [], pathStartOffset: 0, hasDisc: false, autoAssigned: false, coversOffenseId: undefined };
       }
-      return { ...player, x: target.x, y: target.y, path: [], pathStartOffset: 0, hasDisc: target.hasDisc };
+      return { ...player, x: target.x, y: target.y, path: [], pathStartOffset: 0, hasDisc: target.hasDisc, autoAssigned: false, coversOffenseId: undefined };
     });
     const existing = savedPlays.find((p) => p.id === editingPlayId);
     const visibility = existing?.visibility || 'private';
     const sharedTeamIds = existing?.sharedTeamIds || [];
+    const conceptId = existing?.conceptId || playConceptId || undefined;
+    const conceptName = (existing?.conceptName || playConceptName || '').trim() || undefined;
     const nextPlay: Play = {
       id: generateId(),
       ownerId: playOwnerId || currentUser?.uid,
       name: `${playName} - Next`,
+      conceptId,
+      conceptName,
       players: nextPlayers,
       force,
       description: '',
@@ -1131,6 +1119,8 @@ const App: React.FC = () => {
     setPlayOwnerId(nextPlay.ownerId || null);
     setPlayCreatedBy(nextPlay.createdBy || null);
     setPlaySourceId(null);
+    setPlayConceptId(nextPlay.conceptId || null);
+    setPlayConceptName(nextPlay.conceptName || '');
     setStartFromPlayId(editingPlayId);
     setStartLocked(true);
     setSaveStatus('idle');
@@ -1146,11 +1136,11 @@ const App: React.FC = () => {
     if (!play.startLocked || !play.startFromPlayId) return play;
     const parent = savedPlays.find((p) => p.id === play.startFromPlayId);
     if (!parent) return play;
-    const endPositions = getEndPositionsByLabel(parent.players, parent.throws || []);
+    const endPositions = getSequenceAnchorPositionsByLabel(parent.players, parent.throws || []);
     const aligned = alignPlayersToEndState(play.players, endPositions);
     if (!aligned.changed) return play;
     return { ...play, players: aligned.players };
-  }, [savedPlays, getEndPositionsByLabel, alignPlayersToEndState]);
+  }, [savedPlays, getSequenceAnchorPositionsByLabel, alignPlayersToEndState]);
 
   const loadPlay = (play: Play) => {
     const resolved = resolveSequencePlay(play);
@@ -1164,6 +1154,8 @@ const App: React.FC = () => {
     setPlayOwnerId(resolved.ownerId || getCurrentUser()?.uid || null);
     setPlayCreatedBy(resolved.createdBy || null);
     setPlaySourceId(resolved.sourcePlayId || null);
+    setPlayConceptId(resolved.conceptId || null);
+    setPlayConceptName(resolved.conceptName || '');
     setStartFromPlayId(resolved.startFromPlayId || null);
     setStartLocked(Boolean(resolved.startLocked));
     setSelectedPlayerId(null);
@@ -1174,7 +1166,7 @@ const App: React.FC = () => {
     if (!startLocked || !startFromPlayId) return;
     const parent = savedPlays.find((p) => p.id === startFromPlayId);
     if (!parent) return;
-    const endPositions = getEndPositionsByLabel(parent.players, parent.throws || []);
+    const endPositions = getSequenceAnchorPositionsByLabel(parent.players, parent.throws || []);
     setPlayers((prev) => {
       const aligned = alignPlayersToEndState(prev, endPositions);
       return aligned.changed ? aligned.players : prev;
@@ -1190,94 +1182,7 @@ const App: React.FC = () => {
         return next;
       });
     }
-  }, [startLocked, startFromPlayId, editingPlayId, savedPlays, getEndPositionsByLabel, alignPlayersToEndState]);
-
-  const saveFormation = () => {
-    const name = (tempFormationName || 'New Formation').trim();
-    const exists = savedFormations.some(f => f.name.trim().toLowerCase() === name.toLowerCase());
-    if (exists) {
-      setFormationNameError('A formation with this name already exists.');
-      return;
-    }
-    const currentUser = getCurrentUser();
-    if (isFirestoreEnabled() && (!currentUser || currentUser.isAnonymous)) {
-      setPendingSaveAction({ type: 'formation' });
-      setShowSaveFormationModal(false);
-      setShowAuthPrompt(true);
-      return;
-    }
-    const visibility: Formation['visibility'] = 'private';
-    const sharedTeamIds: string[] = [];
-    const newFormation: Formation = {
-      id: generateId(),
-      ownerId: formationOwnerId || currentUser?.uid,
-      name,
-      players: buildFormationPlayers(),
-      visibility,
-      sharedTeamIds: visibility === 'team' ? sharedTeamIds : [],
-      createdBy: formationCreatedBy || currentUser?.uid,
-      lastEditedBy: currentUser?.uid,
-      sourceFormationId: formationSourceId || undefined
-    };
-    setSavedFormations(prev => [newFormation, ...prev]);
-    setFormationOwnerId(newFormation.ownerId || null);
-    setFormationCreatedBy(newFormation.createdBy || null);
-    setFormationSourceId(newFormation.sourceFormationId || null);
-    if (isFirestoreEnabled()) {
-      saveFormationToFirestore(newFormation).catch((error) => console.error('Failed to save formation to Firestore', error));
-    }
-    setTempFormationName('');
-    setFormationNameError(null);
-    setShowSaveFormationModal(false);
-  };
-
-  const loadFormation = (formation: Formation) => {
-    if (startLocked) return;
-    stopAnimation();
-    setPlayers(formation.players);
-    setThrows([]);
-    setActiveFormation('custom');
-    setFormationOwnerId(formation.ownerId || getCurrentUser()?.uid || null);
-    setFormationCreatedBy(formation.createdBy || null);
-    setFormationSourceId(formation.sourceFormationId || null);
-    setSelectedPlayerId(null);
-    setMode(InteractionMode.SELECT);
-  };
-
-  // storage + formation helpers are imported
-
-  const hasUnsavedFormation = useMemo(() => {
-    if (players.length === 0) return false;
-    const current = normalizeFormationPlayers(buildFormationPlayers());
-    const matchesFormation = (formationPlayers: Player[]) => {
-      const saved = normalizeFormationPlayers(formationPlayers);
-      if (saved.length !== current.length) return false;
-      for (let i = 0; i < saved.length; i++) {
-        const a = saved[i];
-        const b = current[i];
-        if (
-          a.team !== b.team ||
-          a.label !== b.label ||
-          a.x !== b.x ||
-          a.y !== b.y ||
-          a.speed !== b.speed ||
-          a.acceleration !== b.acceleration ||
-          a.role !== b.role ||
-          a.hasDisc !== b.hasDisc
-        ) {
-          return false;
-        }
-      }
-      return true;
-    };
-
-    const matchesSaved = savedFormations.some(f => matchesFormation(f.players));
-    const matchesPreset = (['vertical', 'side', 'ho'] as const).some(preset =>
-      matchesFormation(buildPresetFormation(preset, force, (idx) => `preset-${preset}-${idx}`))
-    );
-
-    return !(matchesSaved || matchesPreset);
-  }, [players, savedFormations, force]);
+  }, [startLocked, startFromPlayId, editingPlayId, savedPlays, getSequenceAnchorPositionsByLabel, alignPlayersToEndState]);
 
   const hasUnsavedPlay = useMemo(() => {
     if (players.length === 0) return false;
@@ -1288,7 +1193,6 @@ const App: React.FC = () => {
     });
   }, [players, playName, force, playDescription, savedPlays, throws]);
 
-  const formationSaveReason = hasUnsavedFormation ? '' : 'No changes from an existing or preset formation.';
   const playSaveReason = !players.some(p => p.team === 'offense')
     ? 'Add at least one offensive player before saving.'
     : !hasUnsavedPlay
@@ -1357,7 +1261,7 @@ const App: React.FC = () => {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/50">
               <h2 className="text-lg font-bold flex items-center gap-2"><Plus size={20} className="text-indigo-400" /> Start New Play</h2>
-              <button onClick={() => setShowNewPlayModal(false)} className="text-slate-500 hover:text-white transition-colors"><X size={20} /></button>
+              <button onClick={() => { setShowNewPlayModal(false); setNewPlayConceptName(null); }} className="text-slate-500 hover:text-white transition-colors"><X size={20} /></button>
             </div>
             <div className="p-6 space-y-4">
               <div>
@@ -1366,47 +1270,26 @@ const App: React.FC = () => {
               </div>
             </div>
             <div className="p-6 bg-slate-800/30 flex gap-3">
-              <button onClick={() => setShowNewPlayModal(false)} className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all">Cancel</button>
+              <button onClick={() => { setShowNewPlayModal(false); setNewPlayConceptName(null); }} className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all">Cancel</button>
               <button onClick={() => {
                 const currentUser = getCurrentUser();
+                const conceptDraft = newPlayConceptName?.trim() || '';
                 setPlayers([]);
                 setThrows([]);
-                setPlayName(tempPlayName || 'New Play');
+                setPlayName(tempPlayName || conceptDraft || 'New Play');
                 setEditingPlayId(null);
                 setPlayDescription('');
                 setPlayOwnerId(currentUser?.uid || null);
                 setPlayCreatedBy(currentUser?.uid || null);
                 setPlaySourceId(null);
+                setPlayConceptId(conceptDraft ? generateId() : null);
+                setPlayConceptName(conceptDraft);
                 setStartFromPlayId(null);
                 setStartLocked(false);
+                setNewPlayConceptName(null);
                 setShowNewPlayModal(false);
                 stopAnimation();
               }} className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition-all">Create</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Save Formation Modal */}
-      {showSaveFormationModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/50">
-              <h2 className="text-lg font-bold flex items-center gap-2"><Save size={20} className="text-emerald-400" /> Save Formation</h2>
-              <button onClick={() => setShowSaveFormationModal(false)} className="text-slate-500 hover:text-white transition-colors"><X size={20} /></button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Formation Name</label>
-                <input autoFocus type="text" value={tempFormationName} onChange={(e) => { setTempFormationName(e.target.value); setFormationNameError(null); }} placeholder="e.g. Vert Stack Set" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500/50" />
-                {formationNameError && (
-                  <div className="mt-2 text-[10px] text-red-400 font-medium">{formationNameError}</div>
-                )}
-              </div>
-            </div>
-            <div className="p-6 bg-slate-800/30 flex gap-3">
-              <button onClick={() => setShowSaveFormationModal(false)} className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all">Cancel</button>
-              <button onClick={saveFormation} className="flex-1 py-3 px-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-600/20 transition-all">Save</button>
             </div>
           </div>
         </div>
@@ -1460,7 +1343,7 @@ const App: React.FC = () => {
             </div>
             <div className="p-6 space-y-3">
               <p className="text-sm text-slate-300">
-                Sign in to save plays and formations to your playbook.
+                Sign in to save plays to your playbook.
               </p>
               <button
                 onClick={() => {
@@ -1492,8 +1375,6 @@ const App: React.FC = () => {
           setPendingSaveAction(null);
           if (pending?.type === 'play') {
             savePlay(pending.name);
-          } else if (pending?.type === 'formation') {
-            saveFormation();
           }
         }}
       />
@@ -1539,6 +1420,10 @@ const App: React.FC = () => {
       )}
 
       <HeaderBar
+        onBackToPlaybook={() => {
+          window.history.pushState({}, '', '/playbook');
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        }}
         onManageTeams={() => {
           setPendingManageTeams();
           window.history.pushState({}, '', '/playbook');
@@ -1560,7 +1445,6 @@ const App: React.FC = () => {
         user={authUser}
       />
 
-
       <div className="flex flex-1 overflow-hidden relative">
         
         <WorkflowSidebar
@@ -1575,15 +1459,8 @@ const App: React.FC = () => {
           onPlayNameChange={setPlayName}
           force={force}
           onForceChange={setForce}
-          savedFormations={savedFormations}
-          onLoadFormation={loadFormation}
           onApplyPresetFormation={applyFormationNearOwnEndzone}
           onCreateCustomFormation={() => { setActiveFormation('custom'); setMode(InteractionMode.ADD_OFFENSE); }}
-          onOpenSaveFormationModal={() => { setTempFormationName(''); setFormationNameError(null); setShowSaveFormationModal(true); }}
-          hasUnsavedFormation={hasUnsavedFormation}
-          onSaveFormation={() => { setTempFormationName(''); setFormationNameError(null); setShowSaveFormationModal(true); }}
-          canSaveFormation={hasUnsavedFormation}
-          formationSaveReason={formationSaveReason}
           onAutoAssignDefense={autoAssignDefense}
           onSavePlay={savePlay}
           canSavePlay={players.some(p => p.team === 'offense')}

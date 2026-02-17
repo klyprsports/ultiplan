@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ShieldAlert } from 'lucide-react';
-import { InteractionMode, Player, Formation, Force } from '../types';
+import { InteractionMode, Player, Force } from '../types';
 
 interface WorkflowSidebarProps {
   players: Player[];
@@ -14,15 +14,8 @@ interface WorkflowSidebarProps {
   onPlayNameChange: (name: string) => void;
   force: Force;
   onForceChange: (force: Force) => void;
-  savedFormations: Formation[];
-  onLoadFormation: (formation: Formation) => void;
   onApplyPresetFormation: (formation: 'vertical' | 'side' | 'ho') => void;
   onCreateCustomFormation: () => void;
-  onOpenSaveFormationModal: () => void;
-  hasUnsavedFormation: boolean;
-  onSaveFormation: () => void;
-  canSaveFormation: boolean;
-  formationSaveReason: string;
   onAutoAssignDefense: () => void;
   onSavePlay: (name?: string) => void;
   canSavePlay: boolean;
@@ -51,15 +44,8 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
   onPlayNameChange,
   force,
   onForceChange,
-  savedFormations,
-  onLoadFormation,
   onApplyPresetFormation,
   onCreateCustomFormation,
-  onOpenSaveFormationModal,
-  hasUnsavedFormation,
-  onSaveFormation,
-  canSaveFormation,
-  formationSaveReason,
   onAutoAssignDefense,
   onSavePlay,
   canSavePlay,
@@ -142,7 +128,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
               disabled={isAnimationActive || isStartLocked}
               className={buttonClass}
             >
-              <span className="flex items-center gap-2">Select from existing formation</span>
+              <span className="flex items-center gap-2">Select starting setup</span>
             </button>
             {showFormationMenu && (
               <div className="absolute left-0 mt-2 w-full bg-slate-900 border border-slate-700 rounded-lg shadow-2xl z-50">
@@ -163,28 +149,6 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
                   className="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-200 hover:bg-slate-800"
                 >
                   Ho stack
-                </button>
-                <div className="h-px bg-slate-800 my-1" />
-                <div className="px-4 py-2 text-[9px] uppercase tracking-widest text-slate-500">Saved formations</div>
-                {savedFormations.length === 0 ? (
-                  <div className="px-4 pb-2 text-[10px] text-slate-600 italic">No saved formations yet.</div>
-                ) : (
-                  savedFormations.slice(0, 6).map(f => (
-                    <button
-                      key={f.id}
-                      onClick={() => { onLoadFormation(f); setShowFormationMenu(false); }}
-                      className="w-full text-left px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800"
-                    >
-                      {f.name}
-                    </button>
-                  ))
-                )}
-                <button
-                  onClick={() => { onOpenSaveFormationModal(); setShowFormationMenu(false); }}
-                  disabled={players.length === 0 || !hasUnsavedFormation || isStartLocked}
-                  className="w-full text-left px-4 py-2.5 text-xs font-medium text-emerald-300 hover:bg-slate-800 disabled:text-slate-600 disabled:hover:bg-transparent"
-                >
-                  Save current formation...
                 </button>
                 <div className="h-px bg-slate-800 my-1" />
                 <button
@@ -264,15 +228,6 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
 
       <div className="mt-auto">
         <div className={`${sectionClass} flex flex-col gap-2`} data-tour-id="workflow-save">
-          <button
-            onClick={onSaveFormation}
-            disabled={!canSaveFormation}
-            title={formationSaveReason || 'Save current formation'}
-            data-tour-id="workflow-save-formation"
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors text-[10px] font-bold tracking-widest uppercase bg-slate-900/70 hover:bg-slate-800 text-slate-300 border-slate-800 disabled:opacity-50"
-          >
-            Save Formation
-          </button>
           <button
             onClick={() => onSavePlay()}
             disabled={!canSavePlay || saveStatus === 'saving'}

@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Menu, Users, LogOut, LogIn, BookOpen, UserRound, Sparkles, Share2 } from 'lucide-react';
+import { Menu, Users, LogOut, LogIn, BookOpen, UserRound, Sparkles, Share2, ChevronLeft } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { signInWithGoogle, signOutUser } from '../services/auth';
 
 interface HeaderBarProps {
+  onBackToPlaybook?: () => void;
   onManageTeams: () => void;
   onManageAccount?: () => void;
   onStartTour?: () => void;
@@ -14,6 +15,7 @@ interface HeaderBarProps {
 }
 
 const HeaderBar: React.FC<HeaderBarProps> = ({
+  onBackToPlaybook,
   onManageTeams,
   onManageAccount,
   onStartTour,
@@ -40,6 +42,18 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
             </div>
           )}
         </div>
+        {onBackToPlaybook && (
+          <>
+            <div className="h-6 w-px bg-slate-700/70 ml-1 mr-2" aria-hidden="true" />
+            <button
+              onClick={onBackToPlaybook}
+              className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              <ChevronLeft size={12} />
+              Playbook
+            </button>
+          </>
+        )}
       </div>
       <div className="flex items-center gap-3">
         {user && (

@@ -39,7 +39,7 @@ const AccountModal: React.FC<AccountModalProps> = ({
             </div>
           )}
           <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
-            Deleting your account permanently removes your plays and formations. This cannot be undone.
+            Deleting your account permanently removes your plays. This cannot be undone.
           </div>
           {error && (
             <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs text-red-200">

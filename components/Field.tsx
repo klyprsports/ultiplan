@@ -28,7 +28,8 @@ const FIELD_WIDTH = 40; // yards
 const FIELD_HEIGHT = 110; // yards
 const ENDZONE_DEPTH = 20; // yards
 const SCALE = 8; // pixels per yard
-const REACTION_DELAY = 0.25; // seconds
+const REACTION_DELAY = 0.1; // seconds
+const DEFENDER_BRAKING_MULTIPLIER = 1.7;
 
 const Field: React.FC<FieldProps> = ({
   players,
@@ -133,8 +134,24 @@ const Field: React.FC<FieldProps> = ({
 
   const handleMouseUp = () => { setIsDragging(false); setActivePlayerId(null); };
 
+  const getForceXOffset = (x: number, currentForce: Force) => {
+    const fieldMidX = FIELD_WIDTH / 2;
+    if (currentForce === 'home') return -3;
+    if (currentForce === 'away') return 3;
+    if (currentForce === 'middle') return x < fieldMidX ? 3 : -3;
+    return x < fieldMidX ? -3 : 3;
+  };
+
+  const getBreakXOffset = (x: number, magnitude: number, currentForce: Force) => {
+    const fieldMidX = FIELD_WIDTH / 2;
+    if (currentForce === 'home') return magnitude;
+    if (currentForce === 'away') return -magnitude;
+    if (currentForce === 'middle') return x < fieldMidX ? -magnitude : magnitude;
+    return x < fieldMidX ? magnitude : -magnitude;
+  };
+
   const calculatePositionAtTime = (startX: number, startY: number, path: Point[], time: number, topSpeed: number, acc: number, startOffset = 0): Point => {
-    const adjustedTime = time - startOffset;
+    const adjustedTime = time - Math.max(0, startOffset);
     if (path.length === 0 || adjustedTime <= 0) return { x: startX, y: startY };
     const dec = acc * 2.0;
     const points = [{ x: startX, y: startY }, ...path];
@@ -197,24 +214,232 @@ const Field: React.FC<FieldProps> = ({
     return points[points.length - 1];
   };
 
-  const getAnimatedPosition = (player: Player): Point => {
-    if (animationTime === null) return { x: player.x, y: player.y };
-    if (player.path.length > 0) {
-      const startOffset = player.team === 'offense' ? (player.pathStartOffset ?? 0) : 0;
-      return calculatePositionAtTime(player.x, player.y, player.path, animationTime, player.speed, player.acceleration, startOffset);
+  const animationDebug = useMemo(() => {
+    const positions = new Map<string, Point>();
+    const chaseTargets = new Map<string, Point>();
+    const chasePaths = new Map<string, Point[]>();
+    const accelerationSamples = new Map<string, Array<{ x: number; y: number; ax: number; ay: number }>>();
+    if (animationTime === null) {
+      players.forEach((player) => positions.set(player.id, { x: player.x, y: player.y }));
+      return { positions, chaseTargets, chasePaths, accelerationSamples };
     }
-    if (player.team === 'defense') {
-      const targetId = defensiveAssignments[player.id];
-      const targetOffense = players.find(p => p.id === targetId);
-      if (targetOffense) {
-        const delayedTime = Math.max(0, animationTime - REACTION_DELAY);
-        const startOffset = targetOffense.pathStartOffset ?? 0;
-        const targetPosAtDelayedTime = calculatePositionAtTime(targetOffense.x, targetOffense.y, targetOffense.path, delayedTime, targetOffense.speed, targetOffense.acceleration, startOffset);
-        return { x: player.x + (targetPosAtDelayedTime.x - targetOffense.x), y: player.y + (targetPosAtDelayedTime.y - targetOffense.y) };
+
+    const offensePlayers = players.filter((p) => p.team === 'offense');
+    const offenseById = new Map(offensePlayers.map((p) => [p.id, p]));
+    const extractLabelNumber = (label?: string) => {
+      if (!label) return null;
+      const numeric = parseInt(label.replace(/^\D+/, ''), 10);
+      return Number.isNaN(numeric) ? null : numeric;
+    };
+    const getMatchedOffense = (defender: Player) => {
+      if (defender.coversOffenseId) {
+        const explicit = offenseById.get(defender.coversOffenseId);
+        if (explicit) return explicit;
       }
-    }
-    return { x: player.x, y: player.y };
-  };
+      const defenderNum = extractLabelNumber(defender.label);
+      if (defenderNum !== null) {
+        const byLabel = offensePlayers.find((offense) => extractLabelNumber(offense.label) === defenderNum);
+        if (byLabel) return byLabel;
+      }
+      const nearestTargetId = defensiveAssignments[defender.id];
+      if (nearestTargetId) {
+        const nearest = offenseById.get(nearestTargetId);
+        if (nearest) return nearest;
+      }
+      return undefined;
+    };
+    const trackingOffsets = new Map<string, { dx: number; dy: number; offenseId: string }>();
+    players.forEach((player) => {
+      if (player.team !== 'defense') return;
+      const matched = getMatchedOffense(player);
+      if (!matched) return;
+      trackingOffsets.set(player.id, {
+        dx: player.x - matched.x,
+        dy: player.y - matched.y,
+        offenseId: matched.id
+      });
+    });
+    const getOffensePositionAtTime = (offense: Player, time: number) =>
+      calculatePositionAtTime(
+        offense.x,
+        offense.y,
+        offense.path,
+        time,
+        offense.speed,
+        offense.acceleration,
+        Math.max(0, offense.pathStartOffset ?? 0)
+      );
+
+    const getDefenderTarget = (
+      defender: Player,
+      targetOffense: Player,
+      targetOffensePos: Point,
+      delayedDiscHolderPos: Point | undefined,
+      delayedDiscHolderId: string | undefined
+    ) => {
+      const anchor = trackingOffsets.get(defender.id);
+      const desiredFromAnchor = anchor && anchor.offenseId === targetOffense.id
+        ? { x: targetOffensePos.x + anchor.dx, y: targetOffensePos.y + anchor.dy }
+        : { x: targetOffensePos.x, y: targetOffensePos.y };
+      return {
+        x: desiredFromAnchor.x,
+        y: desiredFromAnchor.y
+      };
+    };
+
+    players.forEach((player) => {
+      if (player.team === 'offense') {
+        const startOffset = Math.max(0, player.pathStartOffset ?? 0);
+        positions.set(player.id, calculatePositionAtTime(player.x, player.y, player.path, animationTime, player.speed, player.acceleration, startOffset));
+        return;
+      }
+
+      const targetOffense = getMatchedOffense(player);
+      if (!targetOffense) {
+        positions.set(player.id, { x: player.x, y: player.y });
+        return;
+      }
+
+      const dt = 1 / 60;
+      const maxSpeedBase = Math.max(0.1, player.speed);
+      const maxAccelBase = Math.max(0.1, player.acceleration);
+      let simX = player.x;
+      let simY = player.y;
+      let velX = 0;
+      let velY = 0;
+      const targetTrail: Point[] = [];
+      let finalDesired: Point = { x: simX, y: simY };
+      let stepIndex = 0;
+      let previousResponseDesired: Point | null = null;
+      let previousDesiredDir: Point | null = null;
+      let burstTimeRemaining = 0;
+      const accelTrail: Array<{ x: number; y: number; ax: number; ay: number }> = [];
+      let nextAccelSampleTime = 0.25;
+
+      for (let t = dt; t <= animationTime + 1e-6; t += dt) {
+        const targetOffensePosNow = getOffensePositionAtTime(targetOffense, t);
+        const responseTime = Math.max(0, t - REACTION_DELAY);
+        const targetOffensePosResponse = getOffensePositionAtTime(targetOffense, responseTime);
+        const discHolder = discHolderId ? offenseById.get(discHolderId) : undefined;
+        const discHolderPosNow = discHolder ? getOffensePositionAtTime(discHolder, t) : undefined;
+        const discHolderPosResponse = discHolder ? getOffensePositionAtTime(discHolder, responseTime) : undefined;
+        const desiredNow = getDefenderTarget(player, targetOffense, targetOffensePosNow, discHolderPosNow, discHolder?.id);
+        const desiredResponse = getDefenderTarget(player, targetOffense, targetOffensePosResponse, discHolderPosResponse, discHolder?.id);
+        finalDesired = desiredNow;
+        const targetVelX = previousResponseDesired ? (desiredResponse.x - previousResponseDesired.x) / dt : 0;
+        const targetVelY = previousResponseDesired ? (desiredResponse.y - previousResponseDesired.y) / dt : 0;
+        previousResponseDesired = desiredResponse;
+        if (stepIndex % 4 === 0) {
+          targetTrail.push(desiredNow);
+        }
+        stepIndex += 1;
+
+        const downfieldSign = discHolderPosResponse
+          ? (Math.sign(targetOffensePosResponse.y - discHolderPosResponse.y) || -1)
+          : -1;
+        const deepCushion = (simY - targetOffensePosResponse.y) * downfieldSign;
+        const needsDeepRecovery = player.cutterDefense === 'deep' && deepCushion < 0.75;
+        const burstActive = burstTimeRemaining > 0;
+        const burstSpeedMultiplier = burstActive ? 1.2 : 1;
+        const burstAccelMultiplier = burstActive ? 1.35 : 1;
+        const maxSpeed = (needsDeepRecovery ? maxSpeedBase * 1.35 : maxSpeedBase) * burstSpeedMultiplier;
+        const maxAccel = (needsDeepRecovery ? maxAccelBase * 1.6 : maxAccelBase) * burstAccelMultiplier;
+
+        const toTargetX = desiredResponse.x - simX;
+        const toTargetY = desiredResponse.y - simY;
+        const toTargetDist = Math.sqrt(toTargetX * toTargetX + toTargetY * toTargetY);
+        const targetSpeedMag = Math.sqrt(targetVelX * targetVelX + targetVelY * targetVelY);
+        if (toTargetDist <= 0.03 && targetSpeedMag < 0.05) {
+          simX = desiredResponse.x;
+          simY = desiredResponse.y;
+          velX = 0;
+          velY = 0;
+          continue;
+        }
+
+        let desiredVelX = 0;
+        let desiredVelY = 0;
+        if (toTargetDist > 1e-4) {
+          const brakingSpeed = Math.sqrt(Math.max(0, 2 * maxAccel * toTargetDist));
+          const correctionSpeed = Math.min(maxSpeed, brakingSpeed);
+          desiredVelX = targetVelX + (toTargetX / toTargetDist) * correctionSpeed;
+          desiredVelY = targetVelY + (toTargetY / toTargetDist) * correctionSpeed;
+        } else {
+          desiredVelX = targetVelX;
+          desiredVelY = targetVelY;
+        }
+
+        const desiredSpeed = Math.sqrt(desiredVelX * desiredVelX + desiredVelY * desiredVelY);
+        if (desiredSpeed > 1e-4) {
+          const dirX = desiredVelX / desiredSpeed;
+          const dirY = desiredVelY / desiredSpeed;
+          if (previousDesiredDir) {
+            const dot = Math.max(-1, Math.min(1, previousDesiredDir.x * dirX + previousDesiredDir.y * dirY));
+            const headingChange = Math.acos(dot);
+            const DIRECTION_CHANGE_THRESHOLD = Math.PI / 7; // ~26 degrees
+            if (headingChange > DIRECTION_CHANGE_THRESHOLD) {
+              burstTimeRemaining = 0.22;
+            }
+          }
+          previousDesiredDir = { x: dirX, y: dirY };
+        }
+
+        if (burstTimeRemaining > 0) {
+          burstTimeRemaining = Math.max(0, burstTimeRemaining - dt);
+        }
+
+        const deltaVX = desiredVelX - velX;
+        const deltaVY = desiredVelY - velY;
+        const deltaV = Math.sqrt(deltaVX * deltaVX + deltaVY * deltaVY);
+        let appliedAX = 0;
+        let appliedAY = 0;
+        if (deltaV > 1e-6) {
+          const currentSpeed = Math.sqrt(velX * velX + velY * velY);
+          const desiredSpeed = Math.sqrt(desiredVelX * desiredVelX + desiredVelY * desiredVelY);
+          const headingDot = currentSpeed > 1e-6 && desiredSpeed > 1e-6
+            ? (velX * desiredVelX + velY * desiredVelY) / (currentSpeed * desiredSpeed)
+            : 1;
+          const braking = desiredSpeed < currentSpeed - 0.05 || headingDot < 0.7;
+          const accelForStep = braking ? maxAccel * DEFENDER_BRAKING_MULTIPLIER : maxAccel;
+          const maxDeltaV = accelForStep * dt;
+          const scale = Math.min(1, maxDeltaV / deltaV);
+          const appliedDVX = deltaVX * scale;
+          const appliedDVY = deltaVY * scale;
+          velX += appliedDVX;
+          velY += appliedDVY;
+          appliedAX = appliedDVX / dt;
+          appliedAY = appliedDVY / dt;
+        }
+
+        const speed = Math.sqrt(velX * velX + velY * velY);
+        if (speed > maxSpeed) {
+          const scale = maxSpeed / speed;
+          velX *= scale;
+          velY *= scale;
+        }
+
+        simX = Math.max(0, Math.min(FIELD_WIDTH, simX + velX * dt));
+        simY = Math.max(0, Math.min(FIELD_HEIGHT, simY + velY * dt));
+        if (t + 1e-6 >= nextAccelSampleTime) {
+          accelTrail.push({ x: simX, y: simY, ax: appliedAX, ay: appliedAY });
+          nextAccelSampleTime += 0.25;
+        }
+      }
+
+      positions.set(player.id, { x: simX, y: simY });
+      chaseTargets.set(player.id, finalDesired);
+      if (targetTrail.length > 0) {
+        chasePaths.set(player.id, targetTrail);
+      }
+      if (accelTrail.length > 0) {
+        accelerationSamples.set(player.id, accelTrail);
+      }
+    });
+
+    return { positions, chaseTargets, chasePaths, accelerationSamples };
+  }, [animationTime, players, defensiveAssignments, discHolderId, force]);
+
+  const getAnimatedPosition = (player: Player): Point => animationDebug.positions.get(player.id) ?? { x: player.x, y: player.y };
 
   const w = FIELD_WIDTH * SCALE, h = FIELD_HEIGHT * SCALE, ez = ENDZONE_DEPTH * SCALE;
   const handleDrop = (clientX: number, clientY: number, payload: string) => {
@@ -347,6 +572,97 @@ const Field: React.FC<FieldProps> = ({
               return pts.length > 1 && (
                 <g key={`path-${player.id}`}>
                   <polyline points={pts.map(p => `${p.x * SCALE},${p.y * SCALE}`).join(' ')} fill="none" stroke={player.team === 'offense' ? '#60a5fa' : '#f87171'} strokeWidth="2" strokeDasharray="4 2" opacity={animationTime ? "0.3" : "0.8"} />
+                </g>
+              );
+            })}
+            {isAnimationActive && players.filter((p) => p.team === 'defense').map((player) => {
+              const chasePath = animationDebug.chasePaths.get(player.id);
+              const chaseTarget = animationDebug.chaseTargets.get(player.id);
+              const accelSamples = animationDebug.accelerationSamples.get(player.id) || [];
+              if (!chaseTarget) return null;
+              return (
+                <g key={`chase-debug-${player.id}`} pointerEvents="none">
+                  {chasePath && chasePath.length > 1 && (
+                    <polyline
+                      points={chasePath.map((p) => `${p.x * SCALE},${p.y * SCALE}`).join(' ')}
+                      fill="none"
+                      stroke="#f59e0b"
+                      strokeWidth="2"
+                      strokeDasharray="3 3"
+                      opacity="0.95"
+                    />
+                  )}
+                  <circle
+                    cx={chaseTarget.x * SCALE}
+                    cy={chaseTarget.y * SCALE}
+                    r={0.5 * SCALE}
+                    fill="none"
+                    stroke="#facc15"
+                    strokeWidth="2"
+                  />
+                  <line
+                    x1={(chaseTarget.x - 0.35) * SCALE}
+                    y1={chaseTarget.y * SCALE}
+                    x2={(chaseTarget.x + 0.35) * SCALE}
+                    y2={chaseTarget.y * SCALE}
+                    stroke="#facc15"
+                    strokeWidth="2"
+                  />
+                  <line
+                    x1={chaseTarget.x * SCALE}
+                    y1={(chaseTarget.y - 0.35) * SCALE}
+                    x2={chaseTarget.x * SCALE}
+                    y2={(chaseTarget.y + 0.35) * SCALE}
+                    stroke="#facc15"
+                    strokeWidth="2"
+                  />
+                  {accelSamples.map((sample, idx) => {
+                    const aMag = Math.sqrt(sample.ax * sample.ax + sample.ay * sample.ay);
+                    if (aMag < 1e-4) return null;
+                    const unitX = sample.ax / aMag;
+                    const unitY = sample.ay / aMag;
+                    const lengthYards = Math.min(1.2, 0.35 + aMag * 0.08);
+                    const startX = sample.x * SCALE;
+                    const startY = sample.y * SCALE;
+                    const endX = (sample.x + unitX * lengthYards) * SCALE;
+                    const endY = (sample.y + unitY * lengthYards) * SCALE;
+                    const arrowBackX = endX - unitX * (0.22 * SCALE);
+                    const arrowBackY = endY - unitY * (0.22 * SCALE);
+                    const perpX = -unitY;
+                    const perpY = unitX;
+                    const wing = 0.09 * SCALE;
+                    return (
+                      <g key={`accel-${player.id}-${idx}`}>
+                        <line
+                          x1={startX}
+                          y1={startY}
+                          x2={endX}
+                          y2={endY}
+                          stroke="#fb7185"
+                          strokeWidth="2"
+                          opacity="0.95"
+                        />
+                        <line
+                          x1={endX}
+                          y1={endY}
+                          x2={arrowBackX + perpX * wing}
+                          y2={arrowBackY + perpY * wing}
+                          stroke="#fb7185"
+                          strokeWidth="2"
+                          opacity="0.95"
+                        />
+                        <line
+                          x1={endX}
+                          y1={endY}
+                          x2={arrowBackX - perpX * wing}
+                          y2={arrowBackY - perpY * wing}
+                          stroke="#fb7185"
+                          strokeWidth="2"
+                          opacity="0.95"
+                        />
+                      </g>
+                    );
+                  })}
                 </g>
               );
             })}

@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Trash2, LayoutGrid, Share2, Users, Plus } from 'lucide-react';
-import { Formation, Play, Player, TeamInfo } from './types';
+import { Trash2, Share2, Users, Plus } from 'lucide-react';
+import { Play, TeamInfo } from './types';
 import {
-  loadFormationsFromStorage,
   loadPlaysFromStorage,
-  saveFormationsToStorage,
   savePlaysToStorage,
   setPendingSelection,
+  setPendingConceptDraft,
+  clearPendingConceptDraft,
   loadPendingManageTeams,
   clearPendingManageTeams,
   clearPlaybookStorage,
@@ -20,89 +20,24 @@ import AccountModal from './components/AccountModal';
 import OnboardingIntroModal from './components/OnboardingIntroModal';
 import ShareModal from './components/ShareModal';
 import AuthModal from './components/AuthModal';
-import { createTeam, deleteAccountData, deleteFormationFromFirestore, deletePlayFromFirestore, fetchFormationsForUser, fetchPlaysForUser, fetchTeamsForUser, isFirestoreEnabled, saveFormationToFirestore, savePlayToFirestore } from './services/firestore';
+import { createTeam, deleteAccountData, deletePlayFromFirestore, fetchPlaysForUser, fetchTeamsForUser, isFirestoreEnabled, savePlayToFirestore } from './services/firestore';
 import { User } from 'firebase/auth';
 
-const FIELD_WIDTH = 40;
-const FIELD_HEIGHT = 110;
-const ENDZONE_DEPTH = 20;
-
-const MiniField: React.FC<{ players: Player[]; showPaths?: boolean }> = ({ players, showPaths = false }) => {
-  const viewBox = `0 0 ${FIELD_WIDTH} ${FIELD_HEIGHT}`;
-  const endzoneTop = ENDZONE_DEPTH;
-  const endzoneBottom = FIELD_HEIGHT - ENDZONE_DEPTH;
-
-  const yardLines = useMemo(
-    () => Array.from({ length: Math.floor(FIELD_HEIGHT / 10) + 1 }, (_, i) => i * 10)
-      .filter((yard) => yard > ENDZONE_DEPTH && yard < FIELD_HEIGHT - ENDZONE_DEPTH),
-    []
-  );
-
-  return (
-    <svg viewBox={viewBox} preserveAspectRatio="xMidYMid meet" className="w-full h-full rounded-lg overflow-hidden">
-      <rect width={FIELD_WIDTH} height={FIELD_HEIGHT} fill="#065f46" />
-      <rect x="0" y="0" width={FIELD_WIDTH} height={FIELD_HEIGHT} fill="none" stroke="rgba(255,255,255,0.4)" strokeWidth="0.4" />
-      <line x1="0" y1={endzoneTop} x2={FIELD_WIDTH} y2={endzoneTop} stroke="rgba(255,255,255,0.5)" strokeWidth="0.4" />
-      <line x1="0" y1={endzoneBottom} x2={FIELD_WIDTH} y2={endzoneBottom} stroke="rgba(255,255,255,0.5)" strokeWidth="0.4" />
-      {yardLines.map((yard) => (
-        <line
-          key={`yard-${yard}`}
-          x1="0"
-          y1={yard}
-          x2={FIELD_WIDTH}
-          y2={yard}
-          stroke="rgba(255,255,255,0.18)"
-          strokeWidth="0.3"
-        />
-      ))}
-      {showPaths && players.map((player) => {
-        const pts = [{ x: player.x, y: player.y }, ...player.path];
-        if (pts.length <= 1) return null;
-        return (
-          <polyline
-            key={`path-${player.id}`}
-            points={pts.map((p) => `${p.x},${p.y}`).join(' ')}
-            fill="none"
-            stroke={player.team === 'offense' ? '#60a5fa' : '#f87171'}
-            strokeWidth="0.35"
-            strokeDasharray="2 1"
-            opacity="0.8"
-          />
-        );
-      })}
-      {players.map((player) => (
-        <g key={player.id} transform={`translate(${player.x}, ${player.y})`}>
-          <circle
-            r={1.4}
-            fill={player.team === 'offense' ? '#2563eb' : '#dc2626'}
-            stroke="rgba(255,255,255,0.4)"
-            strokeWidth="0.2"
-          />
-          {player.hasDisc && (
-            <circle
-              cx={1.4}
-              cy={-1.4}
-              r={0.6}
-              fill="#f8fafc"
-              stroke="#94a3b8"
-              strokeWidth="0.2"
-            />
-          )}
-        </g>
-      ))}
-    </svg>
-  );
+const generateId = () => {
+  try {
+    return crypto.randomUUID();
+  } catch (e) {
+    return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+  }
 };
 
 const PlaybookPage: React.FC = () => {
-  const [tab, setTab] = useState<'plays' | 'formations'>('plays');
   const [savedPlays, setSavedPlays] = useState<Play[]>([]);
-  const [savedFormations, setSavedFormations] = useState<Formation[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [teams, setTeams] = useState<TeamInfo[]>([]);
   const [showTeamModal, setShowTeamModal] = useState(false);
   const [newTeamName, setNewTeamName] = useState('');
-  const [sharingTarget, setSharingTarget] = useState<{ type: 'play' | 'formation'; item: Play | Formation } | null>(null);
+  const [sharingTarget, setSharingTarget] = useState<Play | null>(null);
   const [sharingVisibility, setSharingVisibility] = useState<'private' | 'team' | 'public'>('private');
   const [sharingTeamIds, setSharingTeamIds] = useState<string[]>([]);
   const [showAccountModal, setShowAccountModal] = useState(false);
@@ -112,6 +47,11 @@ const PlaybookPage: React.FC = () => {
   const [showShareModal, setShowShareModal] = useState(false);
   const [shareStatus, setShareStatus] = useState<string | null>(null);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [showNewConceptModal, setShowNewConceptModal] = useState(false);
+  const [newConceptName, setNewConceptName] = useState('');
+  const [moveTarget, setMoveTarget] = useState<Play | null>(null);
+  const [moveConceptChoice, setMoveConceptChoice] = useState<string>('__independent__');
+  const [moveNewConceptName, setMoveNewConceptName] = useState('');
 
   const navigate = useCallback((path: string) => {
     window.history.pushState({}, '', path);
@@ -130,7 +70,6 @@ const PlaybookPage: React.FC = () => {
 
   useEffect(() => {
     setSavedPlays(loadPlaysFromStorage());
-    setSavedFormations(loadFormationsFromStorage());
   }, []);
 
   useEffect(() => {
@@ -158,10 +97,6 @@ const PlaybookPage: React.FC = () => {
   }, [savedPlays]);
 
   useEffect(() => {
-    saveFormationsToStorage(savedFormations);
-  }, [savedFormations]);
-
-  useEffect(() => {
     let cancelled = false;
     const loadRemote = async () => {
       if (!isFirestoreEnabled()) return;
@@ -175,29 +110,20 @@ const PlaybookPage: React.FC = () => {
         if (cancelled) return;
         setTeams(remoteTeams);
         const teamIds = remoteTeams.map((team) => team.id);
-        const [remotePlays, remoteFormations] = await Promise.all([
-          fetchPlaysForUser(teamIds).catch((error) => {
-            console.error('Failed to fetch plays from Firestore', error);
-            throw error;
-          }),
-          fetchFormationsForUser(teamIds).catch((error) => {
-            console.error('Failed to fetch formations from Firestore', error);
-            throw error;
-          })
-        ]);
+        const remotePlays = await fetchPlaysForUser(teamIds).catch((error) => {
+          console.error('Failed to fetch plays from Firestore', error);
+          throw error;
+        });
         if (cancelled) return;
-        if (remotePlays.length > 0 || remoteFormations.length > 0) {
+        if (remotePlays.length > 0) {
           setSavedPlays(remotePlays);
-          setSavedFormations(remoteFormations);
         } else {
           const localPlays = loadPlaysFromStorage();
-          const localFormations = loadFormationsFromStorage();
-          if (localPlays.length > 0 || localFormations.length > 0) {
+          if (localPlays.length > 0) {
             const uid = getCurrentUser()?.uid;
-            await Promise.all([
-              ...localPlays.map((play) => savePlayToFirestore({ ...play, ownerId: play.ownerId || uid, visibility: play.visibility || 'private', sharedTeamIds: play.sharedTeamIds || [] })),
-              ...localFormations.map((formation) => saveFormationToFirestore({ ...formation, ownerId: formation.ownerId || uid, visibility: formation.visibility || 'private', sharedTeamIds: formation.sharedTeamIds || [] }))
-            ]);
+            await Promise.all(
+              localPlays.map((play) => savePlayToFirestore({ ...play, ownerId: play.ownerId || uid, visibility: play.visibility || 'private', sharedTeamIds: play.sharedTeamIds || [] }))
+            );
           }
         }
       } catch (error) {
@@ -217,13 +143,6 @@ const PlaybookPage: React.FC = () => {
     }
   };
 
-  const deleteFormation = (id: string) => {
-    setSavedFormations((prev) => prev.filter((f) => f.id !== id));
-    if (isFirestoreEnabled()) {
-      deleteFormationFromFirestore(id).catch((error) => console.error('Failed to delete formation from Firestore', error));
-    }
-  };
-
   const ensureSignedInForWrite = async () => {
     if (user && !user.isAnonymous) return;
     await signInWithGoogle();
@@ -238,7 +157,6 @@ const PlaybookPage: React.FC = () => {
       }
       clearPlaybookStorage();
       setSavedPlays([]);
-      setSavedFormations([]);
       await deleteCurrentUser();
       setShowAccountModal(false);
     } catch (error) {
@@ -286,20 +204,26 @@ const PlaybookPage: React.FC = () => {
     navigate('/builder');
   };
 
-  const openFormation = (id: string) => {
-    setPendingSelection({ type: 'formation', id });
-    navigate('/builder');
-  };
-
   const createNewPlay = () => {
+    clearPendingConceptDraft();
     setPendingSelection({ type: 'new-play' });
     navigate('/builder');
   };
 
-  const openSharing = (target: { type: 'play' | 'formation'; item: Play | Formation }) => {
-    setSharingTarget(target);
-    setSharingVisibility(target.item.visibility || 'private');
-    setSharingTeamIds(target.item.sharedTeamIds || []);
+  const createNewConcept = () => {
+    const name = newConceptName.trim();
+    if (!name) return;
+    setPendingConceptDraft(name);
+    setPendingSelection({ type: 'new-play' });
+    setNewConceptName('');
+    setShowNewConceptModal(false);
+    navigate('/builder');
+  };
+
+  const openSharing = (play: Play) => {
+    setSharingTarget(play);
+    setSharingVisibility(play.visibility || 'private');
+    setSharingTeamIds(play.sharedTeamIds || []);
   };
 
   const saveSharing = async () => {
@@ -308,28 +232,14 @@ const PlaybookPage: React.FC = () => {
     const currentUser = getCurrentUser();
     if (!currentUser) return;
     const visibility = sharingVisibility;
-    if (sharingTarget.type === 'play') {
-      const play = sharingTarget.item as Play;
-      const updated: Play = {
-        ...play,
-        visibility,
-        sharedTeamIds: visibility === 'team' ? sharingTeamIds : []
-      };
-      setSavedPlays((prev) => prev.map((p) => (p.id === play.id ? updated : p)));
-      if (isFirestoreEnabled()) {
-        await savePlayToFirestore(updated);
-      }
-    } else {
-      const formation = sharingTarget.item as Formation;
-      const updated: Formation = {
-        ...formation,
-        visibility,
-        sharedTeamIds: visibility === 'team' ? sharingTeamIds : []
-      };
-      setSavedFormations((prev) => prev.map((f) => (f.id === formation.id ? updated : f)));
-      if (isFirestoreEnabled()) {
-        await saveFormationToFirestore(updated);
-      }
+    const updated: Play = {
+      ...sharingTarget,
+      visibility,
+      sharedTeamIds: visibility === 'team' ? sharingTeamIds : []
+    };
+    setSavedPlays((prev) => prev.map((p) => (p.id === sharingTarget.id ? updated : p)));
+    if (isFirestoreEnabled()) {
+      await savePlayToFirestore(updated);
     }
     setSharingTarget(null);
   };
@@ -348,6 +258,190 @@ const PlaybookPage: React.FC = () => {
     } catch (error) {
       console.error('Failed to create team', error);
     }
+  };
+
+  const conceptOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    savedPlays.forEach((play) => {
+      const id = play.conceptId?.trim();
+      if (!id) return;
+      const name = play.conceptName?.trim() || 'Untitled Concept';
+      if (!map.has(id)) {
+        map.set(id, name);
+      }
+    });
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [savedPlays]);
+
+  const openMoveConceptModal = (play: Play) => {
+    setMoveTarget(play);
+    setMoveConceptChoice(play.conceptId?.trim() || '__independent__');
+    setMoveNewConceptName('');
+  };
+
+  const saveMoveConcept = async () => {
+    if (!moveTarget) return;
+    let nextConceptId: string | undefined;
+    let nextConceptName: string | undefined;
+
+    if (moveConceptChoice === '__independent__') {
+      nextConceptId = undefined;
+      nextConceptName = undefined;
+    } else if (moveConceptChoice === '__new__') {
+      const name = moveNewConceptName.trim();
+      if (!name) return;
+      nextConceptId = generateId();
+      nextConceptName = name;
+    } else {
+      const existing = conceptOptions.find((option) => option.id === moveConceptChoice);
+      if (!existing) return;
+      nextConceptId = existing.id;
+      nextConceptName = existing.name;
+    }
+
+    const updatedPlay: Play = {
+      ...moveTarget,
+      conceptId: nextConceptId,
+      conceptName: nextConceptName
+    };
+
+    setSavedPlays((prev) => prev.map((play) => (play.id === moveTarget.id ? updatedPlay : play)));
+
+    if (isFirestoreEnabled()) {
+      try {
+        await savePlayToFirestore(updatedPlay);
+      } catch (error) {
+        console.error('Failed to update play concept in Firestore', error);
+      }
+    }
+
+    setMoveTarget(null);
+    setMoveConceptChoice('__independent__');
+    setMoveNewConceptName('');
+  };
+
+  const playConcepts = useMemo(() => {
+    if (savedPlays.length === 0) return [];
+
+    const conceptMap = new Map<string, Play[]>();
+    savedPlays.forEach((play) => {
+      const key = play.conceptId?.trim() || '__independent__';
+      const list = conceptMap.get(key) || [];
+      list.push(play);
+      conceptMap.set(key, list);
+    });
+
+    const sortByName = (a: Play, b: Play) => a.name.localeCompare(b.name);
+
+    return Array.from(conceptMap.entries())
+      .map(([conceptId, plays]) => {
+        const conceptIds = new Set(plays.map((play) => play.id));
+        const childrenByParent = new Map<string, Play[]>();
+        const roots: Play[] = [];
+
+        plays.forEach((play) => {
+          if (play.startFromPlayId && conceptIds.has(play.startFromPlayId)) {
+            const children = childrenByParent.get(play.startFromPlayId) || [];
+            children.push(play);
+            childrenByParent.set(play.startFromPlayId, children);
+          } else {
+            roots.push(play);
+          }
+        });
+
+        roots.sort(sortByName);
+        childrenByParent.forEach((children) => children.sort(sortByName));
+
+        const isIndependent = conceptId === '__independent__';
+        const conceptName = isIndependent
+          ? 'No Concept'
+          : (plays.find((play) => play.conceptName?.trim())?.conceptName?.trim() || 'Untitled Concept');
+        const sequences: Play[][] = [];
+        const buildSequences = (node: Play, path: Play[]) => {
+          const nextPath = [...path, node];
+          const children = childrenByParent.get(node.id) || [];
+          if (children.length === 0) {
+            sequences.push(nextPath);
+            return;
+          }
+          children.forEach((child) => buildSequences(child, nextPath));
+        };
+        roots.forEach((root) => buildSequences(root, []));
+
+        return {
+          id: conceptId,
+          isIndependent,
+          name: conceptName,
+          playCount: plays.length,
+          sequences
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [savedPlays]);
+
+  const renderPlayCard = (play: Play): React.ReactNode => {
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => openPlay(play.id)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            openPlay(play.id);
+          }
+        }}
+        className="rounded-xl border border-slate-800 bg-slate-900/60 hover:border-emerald-500/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 transition-colors cursor-pointer"
+      >
+        <div className="flex items-center justify-between gap-3 p-3">
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-bold text-sky-200 truncate" title={play.name}>{play.name}</h3>
+            <div className="mt-1 flex items-center gap-2 text-[9px] uppercase tracking-widest">
+              {play.ownerId === user?.uid ? (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                                openSharing(play);
+                  }}
+                  className="px-2 py-1 rounded-full bg-slate-800 text-slate-200 hover:bg-slate-700 transition-colors"
+                  aria-label="Change sharing level"
+                  title="Change sharing level"
+                >
+                  {play.visibility || 'private'}
+                </button>
+              ) : (
+                <span className="px-2 py-1 rounded-full bg-slate-800 text-slate-300">{play.visibility || 'private'}</span>
+              )}
+            </div>
+          </div>
+          {play.ownerId === user?.uid && (
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openMoveConceptModal(play);
+                }}
+                className="px-2 py-1 rounded-lg text-[10px] uppercase tracking-widest text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
+              >
+                Move
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  deletePlay(play.id);
+                }}
+                className="p-2 rounded-lg text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-colors"
+                aria-label="Delete play"
+              >
+                <Trash2 size={16} />
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -377,176 +471,62 @@ const PlaybookPage: React.FC = () => {
         <div className="flex items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold">Your playbook</h1>
-            <p className="text-sm text-slate-400">Browse saved plays and formations, then open them in the builder.</p>
+            <p className="text-sm text-slate-400">Browse saved plays, then open them in the builder.</p>
           </div>
           <div className="flex items-center gap-3">
             <button
-              onClick={createNewPlay}
+              onClick={() => setShowNewConceptModal(true)}
               className="px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest bg-emerald-500 text-emerald-950 hover:bg-emerald-400 shadow-lg shadow-emerald-500/30"
+            >
+              New Concept
+            </button>
+            <button
+              onClick={createNewPlay}
+              className="px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest bg-sky-500 text-sky-950 hover:bg-sky-400 shadow-lg shadow-sky-500/30"
             >
               New Play
             </button>
-            <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-xl p-1 text-[11px] font-bold uppercase tracking-widest">
-              <button
-                onClick={() => setTab('plays')}
-                className={`px-3 py-2 rounded-lg flex items-center gap-2 ${tab === 'plays' ? 'bg-emerald-500 text-emerald-950' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                <LayoutGrid size={14} /> Plays
-              </button>
-              <button
-                onClick={() => setTab('formations')}
-                className={`px-3 py-2 rounded-lg flex items-center gap-2 ${tab === 'formations' ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-              >
-                Formations
-              </button>
-            </div>
           </div>
         </div>
 
-        {tab === 'plays' && (
-          <section className="mt-8">
-            {savedPlays.length === 0 ? (
-              <div className="py-16 text-center text-slate-500 italic">No plays saved yet.</div>
-            ) : (
-              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {savedPlays.map((play) => (
-                  <div
-                    key={play.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => openPlay(play.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        openPlay(play.id);
-                      }
-                    }}
-                    className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg w-full overflow-hidden cursor-pointer hover:border-emerald-500/60 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <h3 className="text-base sm:text-lg font-extrabold text-white leading-tight break-words" title={play.name}>
-                          {play.name}
-                        </h3>
-                        <div className="mt-2 flex flex-wrap gap-2 text-[9px] uppercase tracking-widest">
-                          {play.ownerId === user?.uid ? (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openSharing({ type: 'play', item: play });
-                              }}
-                              className="px-2 py-1 rounded-full bg-slate-800 text-slate-200 hover:bg-slate-700 transition-colors"
-                              aria-label="Change sharing level"
-                              title="Change sharing level"
-                            >
-                              {play.visibility || 'private'}
-                            </button>
-                          ) : (
-                            <span className="px-2 py-1 rounded-full bg-slate-800 text-slate-300">{play.visibility || 'private'}</span>
-                          )}
-                          {play.ownerId && play.ownerId !== user?.uid && (
-                            <span className="px-2 py-1 rounded-full bg-indigo-500/20 text-indigo-200">Shared</span>
-                          )}
+        <section className="mt-8">
+          {playConcepts.length === 0 ? (
+            <div className="py-16 text-center text-slate-500 italic">No plays saved yet.</div>
+          ) : (
+            <div className="space-y-6">
+              {playConcepts.map((concept) => (
+                <div key={concept.id} className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 shadow-lg">
+                  <div className="flex items-center justify-between gap-3">
+                    <h2 className={`text-sm font-extrabold uppercase tracking-[0.18em] ${concept.isIndependent ? 'text-slate-300' : 'text-emerald-300'}`}>
+                      {concept.name}
+                    </h2>
+                  </div>
+                  <div className="mt-3 overflow-x-auto">
+                    <div className="grid grid-flow-col auto-cols-[minmax(230px,1fr)] gap-4 pb-1">
+                      {concept.sequences.map((sequence, sequenceIndex) => (
+                        <div key={`${concept.id}-sequence-${sequenceIndex}`} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                          <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-3">
+                            Sequence {sequenceIndex + 1}
+                          </div>
+                          <div className="space-y-2">
+                            {sequence.map((play, stepIndex) => (
+                              <div key={`${concept.id}-${sequenceIndex}-${play.id}-${stepIndex}`} className="space-y-2">
+                                {renderPlayCard(play)}
+                                {stepIndex < sequence.length - 1 && (
+                                  <div className="text-center text-slate-600 text-[10px] uppercase tracking-widest">then</div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {play.ownerId === user?.uid && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deletePlay(play.id);
-                            }}
-                            className="p-2 rounded-lg text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-colors"
-                            aria-label="Delete play"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    <div className="mt-2 w-full max-w-[180px] aspect-[4/11] rounded-lg overflow-hidden bg-slate-950/40 border border-slate-800/80 self-center">
-                      <MiniField players={play.players} showPaths />
+                      ))}
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
-
-        {tab === 'formations' && (
-          <section className="mt-8">
-            {savedFormations.length === 0 ? (
-              <div className="py-16 text-center text-slate-500 italic">No formations saved yet.</div>
-            ) : (
-              <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {savedFormations.map((formation) => (
-                  <div
-                    key={formation.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => openFormation(formation.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        openFormation(formation.id);
-                      }
-                    }}
-                    className="bg-slate-900/60 border border-slate-800 rounded-2xl p-4 flex flex-col gap-4 shadow-lg w-full overflow-hidden cursor-pointer hover:border-indigo-500/60 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/70"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <h3 className="text-base sm:text-lg font-extrabold text-white leading-tight break-words" title={formation.name}>
-                          {formation.name}
-                        </h3>
-                        <div className="text-[11px] uppercase tracking-[0.2em] text-slate-300 font-bold mt-1 w-full truncate">
-                          {formation.players.filter((p) => p.team === 'offense').length} O - {formation.players.filter((p) => p.team === 'defense').length} D
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-2 text-[9px] uppercase tracking-widest">
-                          {formation.ownerId === user?.uid ? (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openSharing({ type: 'formation', item: formation });
-                              }}
-                              className="px-2 py-1 rounded-full bg-slate-800 text-slate-200 hover:bg-slate-700 transition-colors"
-                              aria-label="Change sharing level"
-                              title="Change sharing level"
-                            >
-                              {formation.visibility || 'private'}
-                            </button>
-                          ) : (
-                            <span className="px-2 py-1 rounded-full bg-slate-800 text-slate-300">{formation.visibility || 'private'}</span>
-                          )}
-                          {formation.ownerId && formation.ownerId !== user?.uid && (
-                            <span className="px-2 py-1 rounded-full bg-indigo-500/20 text-indigo-200">Shared</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {formation.ownerId === user?.uid && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteFormation(formation.id);
-                            }}
-                            className="p-2 rounded-lg text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-colors"
-                            aria-label="Delete formation"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    <div className="mt-2 w-full max-w-[180px] aspect-[4/11] rounded-lg overflow-hidden bg-slate-950/40 border border-slate-800/80 self-center">
-                      <MiniField players={formation.players} />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-        )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
         <AccountModal
           isOpen={showAccountModal}
@@ -614,6 +594,100 @@ const PlaybookPage: React.FC = () => {
                       <Plus size={14} />
                     </button>
                   </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showNewConceptModal && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/50">
+                <h2 className="text-base font-bold">Create Concept</h2>
+                <button onClick={() => setShowNewConceptModal(false)} className="text-slate-500 hover:text-white transition-colors">X</button>
+              </div>
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Concept Name</label>
+                  <input
+                    autoFocus
+                    value={newConceptName}
+                    onChange={(e) => setNewConceptName(e.target.value)}
+                    placeholder="e.g. Horizontal Base"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      setShowNewConceptModal(false);
+                      setNewConceptName('');
+                    }}
+                    className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={createNewConcept}
+                    className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition-all"
+                  >
+                    Create Concept
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {moveTarget && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/50">
+                <h2 className="text-base font-bold">Move To Concept</h2>
+                <button onClick={() => setMoveTarget(null)} className="text-slate-500 hover:text-white transition-colors">X</button>
+              </div>
+              <div className="p-6 space-y-4">
+                <div className="text-sm text-slate-300 truncate" title={moveTarget.name}>{moveTarget.name}</div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Concept</label>
+                  <select
+                    value={moveConceptChoice}
+                    onChange={(e) => setMoveConceptChoice(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                  >
+                    <option value="__independent__">No Concept</option>
+                    {conceptOptions.map((option) => (
+                      <option key={option.id} value={option.id}>{option.name}</option>
+                    ))}
+                    <option value="__new__">Create New Concept...</option>
+                  </select>
+                </div>
+                {moveConceptChoice === '__new__' && (
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">New Concept Name</label>
+                    <input
+                      autoFocus
+                      value={moveNewConceptName}
+                      onChange={(e) => setMoveNewConceptName(e.target.value)}
+                      placeholder="e.g. Horizontal Counter Set"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                    />
+                  </div>
+                )}
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setMoveTarget(null)}
+                    className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={saveMoveConcept}
+                    className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition-all"
+                  >
+                    Move
+                  </button>
                 </div>
               </div>
             </div>

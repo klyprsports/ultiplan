@@ -1,6 +1,5 @@
 import {
   collection,
-  collectionGroup,
   deleteDoc,
   doc,
   DocumentData,
@@ -14,7 +13,7 @@ import {
   where
 } from 'firebase/firestore';
 import { auth, db, isFirebaseConfigured } from './firebase';
-import { Formation, Play, Player, TeamInfo } from '../types';
+import { Play, Player, TeamInfo } from '../types';
 
 const PLAYBOOK_MIGRATION_KEY = 'ultiplan_migrated_playbook_v2';
 
@@ -95,6 +94,8 @@ const serializePlay = (play: Play, uid: string) => {
   return {
     ownerId: play.ownerId || uid,
     name: play.name.trim(),
+    conceptId: play.conceptId || null,
+    conceptName: play.conceptName?.trim() || null,
     force: play.force,
     description: play.description.trim(),
     players: play.players.map(serializePlayer),
@@ -118,26 +119,12 @@ const serializePlay = (play: Play, uid: string) => {
   };
 };
 
-const serializeFormation = (formation: Formation, uid: string) => {
-  const visibility = normalizeVisibility(formation.visibility);
-  return {
-    ownerId: formation.ownerId || uid,
-    name: formation.name.trim(),
-    players: formation.players.map(serializePlayer),
-    visibility,
-    sharedTeamIds: visibility === 'team' ? formation.sharedTeamIds || [] : [],
-    createdBy: formation.createdBy || uid,
-    lastEditedBy: uid,
-    sourceFormationId: formation.sourceFormationId || null,
-    createdAt: formation.createdAt || serverTimestamp(),
-    updatedAt: serverTimestamp()
-  };
-};
-
 const hydratePlay = (data: Omit<Play, 'id'>, id: string): Play => ({
   id,
   ...data,
   ownerId: data.ownerId,
+  conceptId: data.conceptId || undefined,
+  conceptName: data.conceptName || undefined,
   visibility: data.visibility || 'private',
   sharedTeamIds: data.sharedTeamIds || [],
   startFromPlayId: data.startFromPlayId || undefined,
@@ -150,15 +137,6 @@ const hydratePlay = (data: Omit<Play, 'id'>, id: string): Play => ({
     angle: t.angle,
     power: t.power
   })),
-  players: hydratePlayers(data.players || [])
-});
-
-const hydrateFormation = (data: Omit<Formation, 'id'>, id: string): Formation => ({
-  id,
-  ...data,
-  ownerId: data.ownerId,
-  visibility: data.visibility || 'private',
-  sharedTeamIds: data.sharedTeamIds || [],
   players: hydratePlayers(data.players || [])
 });
 
@@ -243,25 +221,20 @@ export const createTeam = async (name: string): Promise<TeamInfo | null> => {
 };
 
 const migrateLegacyPlaybook = async () => {
-  if (!db) return { plays: [], formations: [] } as { plays: Play[]; formations: Formation[] };
+  if (!db) return { plays: [] as Play[] };
   const uid = getUserId();
-  if (!uid) return { plays: [], formations: [] };
+  if (!uid) return { plays: [] as Play[] };
   if (localStorage.getItem(`${PLAYBOOK_MIGRATION_KEY}_${uid}`) === 'true') {
-    return { plays: [], formations: [] };
+    return { plays: [] as Play[] };
   }
   const legacyPlaysRef = collection(db, 'playbook', uid, 'plays');
-  const legacyFormationsRef = collection(db, 'playbook', uid, 'formations');
-  const [legacyPlaysSnap, legacyFormationsSnap] = await Promise.all([
-    getDocs(legacyPlaysRef),
-    getDocs(legacyFormationsRef)
-  ]);
+  const legacyPlaysSnap = await getDocs(legacyPlaysRef);
 
   const legacyPlays = legacyPlaysSnap.docs.map((docSnap) => hydratePlay(docSnap.data() as Omit<Play, 'id'>, docSnap.id));
-  const legacyFormations = legacyFormationsSnap.docs.map((docSnap) => hydrateFormation(docSnap.data() as Omit<Formation, 'id'>, docSnap.id));
 
-  if (legacyPlays.length === 0 && legacyFormations.length === 0) {
+  if (legacyPlays.length === 0) {
     localStorage.setItem(`${PLAYBOOK_MIGRATION_KEY}_${uid}`, 'true');
-    return { plays: [], formations: [] };
+    return { plays: [] as Play[] };
   }
 
   const normalizedLegacyPlays = legacyPlays.map((play) => ({
@@ -270,20 +243,10 @@ const migrateLegacyPlaybook = async () => {
     visibility: 'private' as const,
     sharedTeamIds: []
   }));
-  const normalizedLegacyFormations = legacyFormations.map((formation) => ({
-    ...formation,
-    ownerId: uid,
-    visibility: 'private' as const,
-    sharedTeamIds: []
-  }));
-
-  await Promise.all([
-    ...normalizedLegacyPlays.map((play) => savePlayToFirestore(play)),
-    ...normalizedLegacyFormations.map((formation) => saveFormationToFirestore(formation))
-  ]);
+  await Promise.all(normalizedLegacyPlays.map((play) => savePlayToFirestore(play)));
 
   localStorage.setItem(`${PLAYBOOK_MIGRATION_KEY}_${uid}`, 'true');
-  return { plays: normalizedLegacyPlays, formations: normalizedLegacyFormations };
+  return { plays: normalizedLegacyPlays };
 };
 
 export const fetchPlaysForUser = async (teamIds: string[]): Promise<Play[]> => {
@@ -321,41 +284,6 @@ export const fetchPlaysForUser = async (teamIds: string[]): Promise<Play[]> => {
   return merged;
 };
 
-export const fetchFormationsForUser = async (teamIds: string[]): Promise<Formation[]> => {
-  if (!db) return [];
-  const uid = getUserId();
-  if (!uid) return [];
-
-  const ownedSnap = await getDocs(
-    query(collection(db, 'formations'), where('ownerId', '==', uid), orderBy('updatedAt', 'desc'))
-  );
-  const owned = ownedSnap.docs.map((docSnap) => hydrateFormation(docSnap.data() as Omit<Formation, 'id'>, docSnap.id));
-
-  const teamShared: Formation[] = [];
-  if (teamIds.length > 0) {
-    const chunks = chunk(teamIds, 10);
-    for (const ids of chunks) {
-      const snap = await getDocs(
-        query(
-          collection(db, 'formations'),
-          where('visibility', '==', 'team'),
-          where('sharedTeamIds', 'array-contains-any', ids)
-        )
-      );
-      teamShared.push(...snap.docs.map((docSnap) => hydrateFormation(docSnap.data() as Omit<Formation, 'id'>, docSnap.id)));
-    }
-  }
-
-  let merged = mergeById([...owned, ...teamShared]);
-  if (merged.length === 0) {
-    const migration = await migrateLegacyPlaybook();
-    if (migration.formations.length > 0) {
-      merged = mergeById([...merged, ...migration.formations]);
-    }
-  }
-  return merged;
-};
-
 export const savePlayToFirestore = async (play: Play) => {
   if (!db) return;
   const uid = getUserId();
@@ -364,27 +292,11 @@ export const savePlayToFirestore = async (play: Play) => {
   await setDoc(doc(db, 'plays', playId), serializePlay({ ...play, id: playId }, uid), { merge: true });
 };
 
-export const saveFormationToFirestore = async (formation: Formation) => {
-  if (!db) return;
-  const uid = getUserId();
-  if (!uid) return;
-  const formationId = formation.id || generateId();
-  await setDoc(doc(db, 'formations', formationId), serializeFormation({ ...formation, id: formationId }, uid), { merge: true });
-};
-
 export const deletePlayFromFirestore = async (id: string) => {
   if (!db) return;
   const uid = getUserId();
   if (!uid) return;
   const docRef = doc(db, 'plays', id);
-  await deleteDoc(docRef);
-};
-
-export const deleteFormationFromFirestore = async (id: string) => {
-  if (!db) return;
-  const uid = getUserId();
-  if (!uid) return;
-  const docRef = doc(db, 'formations', id);
   await deleteDoc(docRef);
 };
 
@@ -400,15 +312,13 @@ export const deleteAccountData = async () => {
     }
   };
 
-  const [playsSnap, formationsSnap, legacyPlaysSnap, legacyFormationsSnap] = await Promise.all([
+  const [playsSnap, legacyPlaysSnap, legacyFormationsSnap] = await Promise.all([
     getDocs(query(collection(db, 'plays'), where('ownerId', '==', uid))),
-    getDocs(query(collection(db, 'formations'), where('ownerId', '==', uid))),
     getDocs(collection(db, 'playbook', uid, 'plays')),
     getDocs(collection(db, 'playbook', uid, 'formations'))
   ]);
 
   await deleteDocs(playsSnap.docs);
-  await deleteDocs(formationsSnap.docs);
   await deleteDocs(legacyPlaysSnap.docs);
   await deleteDocs(legacyFormationsSnap.docs);
   await deleteDoc(doc(db, 'users', uid));
