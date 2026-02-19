@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Trash2, Share2, Users, Plus } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Share2, Users, Plus, ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
 import { Play, TeamInfo } from './types';
 import {
   loadPlaysFromStorage,
@@ -31,6 +31,33 @@ const generateId = () => {
   }
 };
 
+const toTimestampMs = (value: unknown): number => {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  if (typeof value === 'object') {
+    if ('toMillis' in value && typeof (value as { toMillis?: unknown }).toMillis === 'function') {
+      try {
+        return (value as { toMillis: () => number }).toMillis();
+      } catch {
+        return 0;
+      }
+    }
+    if ('seconds' in value) {
+      const seconds = Number((value as { seconds?: unknown }).seconds);
+      const nanos = Number((value as { nanoseconds?: unknown }).nanoseconds || 0);
+      if (Number.isFinite(seconds)) {
+        return (seconds * 1000) + (Number.isFinite(nanos) ? nanos / 1_000_000 : 0);
+      }
+    }
+  }
+  return 0;
+};
+
 const PlaybookPage: React.FC = () => {
   const [savedPlays, setSavedPlays] = useState<Play[]>([]);
   const [user, setUser] = useState<User | null>(null);
@@ -52,6 +79,11 @@ const PlaybookPage: React.FC = () => {
   const [moveTarget, setMoveTarget] = useState<Play | null>(null);
   const [moveConceptChoice, setMoveConceptChoice] = useState<string>('__independent__');
   const [moveNewConceptName, setMoveNewConceptName] = useState('');
+  const [expandedConcepts, setExpandedConcepts] = useState<Record<string, boolean>>({});
+  const [sequenceNameDrafts, setSequenceNameDrafts] = useState<Record<string, string>>({});
+  const sequenceNameSaveTimersRef = useRef<Record<string, number>>({});
+  const [draggingSequence, setDraggingSequence] = useState<{ conceptId: string; sequenceIndex: number } | null>(null);
+  const [dragOverSequenceKey, setDragOverSequenceKey] = useState<string | null>(null);
 
   const navigate = useCallback((path: string) => {
     window.history.pushState({}, '', path);
@@ -136,11 +168,99 @@ const PlaybookPage: React.FC = () => {
     };
   }, [user?.uid]);
 
-  const deletePlay = (id: string) => {
-    setSavedPlays((prev) => prev.filter((p) => p.id !== id));
-    if (isFirestoreEnabled()) {
-      deletePlayFromFirestore(id).catch((error) => console.error('Failed to delete play from Firestore', error));
+  const applyPlaybookMutation = async (nextPlays: Play[], updatedPlays: Play[], deletedIds: string[]) => {
+    setSavedPlays(nextPlays);
+    if (!isFirestoreEnabled()) return;
+    await Promise.all([
+      ...updatedPlays.map((play) => (
+        savePlayToFirestore(play).catch((error) => {
+          console.error('Failed to persist play update', error);
+        })
+      )),
+      ...deletedIds.map((id) => (
+        deletePlayFromFirestore(id).catch((error) => {
+          console.error('Failed to delete play from Firestore', error);
+        })
+      ))
+    ]);
+  };
+
+  const getDescendantIds = (startId: string, allPlays: Play[]) => {
+    const childMap = new Map<string, string[]>();
+    allPlays.forEach((play) => {
+      if (!play.startFromPlayId) return;
+      const children = childMap.get(play.startFromPlayId) || [];
+      children.push(play.id);
+      childMap.set(play.startFromPlayId, children);
+    });
+    const ids: string[] = [];
+    const stack = [startId];
+    const seen = new Set<string>();
+    while (stack.length > 0) {
+      const id = stack.pop()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      ids.push(id);
+      const children = childMap.get(id) || [];
+      children.forEach((childId) => stack.push(childId));
     }
+    return ids;
+  };
+
+  const deletePlaySubtree = async (playId: string) => {
+    const play = savedPlays.find((entry) => entry.id === playId);
+    if (!play) return;
+    const idsToDelete = getDescendantIds(playId, savedPlays);
+    const confirmed = window.confirm(
+      idsToDelete.length > 1
+        ? `Delete "${play.name}" and ${idsToDelete.length - 1} downstream play(s)?`
+        : `Delete "${play.name}"?`
+    );
+    if (!confirmed) return;
+    const deleteSet = new Set(idsToDelete);
+    const nextPlays = savedPlays.filter((entry) => !deleteSet.has(entry.id));
+    await applyPlaybookMutation(nextPlays, [], idsToDelete);
+  };
+
+  const deletePlayStepOnly = async (playId: string) => {
+    const play = savedPlays.find((entry) => entry.id === playId);
+    if (!play) return;
+    const confirmed = window.confirm(`Delete step "${play.name}" and relink any following steps?`);
+    if (!confirmed) return;
+    const children = savedPlays.filter((entry) => entry.startFromPlayId === playId);
+    const relinked = children.map((child) => ({
+      ...child,
+      startFromPlayId: play.startFromPlayId,
+      startLocked: Boolean(play.startFromPlayId)
+    }));
+    const relinkedById = new Map(relinked.map((entry) => [entry.id, entry]));
+    const nextPlays = savedPlays
+      .filter((entry) => entry.id !== playId)
+      .map((entry) => relinkedById.get(entry.id) || entry);
+    await applyPlaybookMutation(nextPlays, relinked, [playId]);
+  };
+
+  const deleteSequenceBranch = async (sequence: Play[], allSequences: Play[][]) => {
+    if (sequence.length === 0) return;
+    const occurrence = new Map<string, number>();
+    allSequences.forEach((path) => {
+      const uniqueIds = new Set(path.map((entry) => entry.id));
+      uniqueIds.forEach((id) => occurrence.set(id, (occurrence.get(id) || 0) + 1));
+    });
+    const firstUniqueIndex = sequence.findIndex((entry) => (occurrence.get(entry.id) || 0) === 1);
+    const deleteAnchorIndex = firstUniqueIndex >= 0 ? firstUniqueIndex : sequence.length - 1;
+    const anchor = sequence[deleteAnchorIndex];
+    if (!anchor) return;
+    const idsToDelete = getDescendantIds(anchor.id, savedPlays);
+    const confirmed = window.confirm(
+      idsToDelete.length > 1
+        ? `Delete this sequence branch (${idsToDelete.length} plays)?`
+        : 'Delete this sequence branch?'
+    );
+    if (!confirmed) return;
+    const deleteSet = new Set(idsToDelete);
+    const nextPlays = savedPlays.filter((entry) => !deleteSet.has(entry.id));
+    await applyPlaybookMutation(nextPlays, [], idsToDelete);
   };
 
   const ensureSignedInForWrite = async () => {
@@ -207,6 +327,42 @@ const PlaybookPage: React.FC = () => {
   const createNewPlay = () => {
     clearPendingConceptDraft();
     setPendingSelection({ type: 'new-play' });
+    navigate('/builder');
+  };
+
+  const createNewSequenceInConcept = (conceptId: string, conceptName: string) => {
+    clearPendingConceptDraft();
+    const conceptPlays = savedPlays.filter((play) => (play.conceptId?.trim() || '') === conceptId);
+    const playOrder = new Map(savedPlays.map((play, index) => [play.id, index]));
+    const playById = new Map(savedPlays.map((play) => [play.id, play]));
+
+    const getRootIdForPlay = (play: Play) => {
+      let cursor: Play | undefined = play;
+      const seen = new Set<string>();
+      while (cursor?.startFromPlayId) {
+        if (seen.has(cursor.startFromPlayId)) break;
+        seen.add(cursor.startFromPlayId);
+        const parent = playById.get(cursor.startFromPlayId);
+        if (!parent) break;
+        cursor = parent;
+      }
+      return cursor?.id;
+    };
+
+    const latestPlay = [...conceptPlays].sort((a, b) => {
+      const aTime = Math.max(toTimestampMs(a.updatedAt), toTimestampMs(a.createdAt));
+      const bTime = Math.max(toTimestampMs(b.updatedAt), toTimestampMs(b.createdAt));
+      if (aTime !== bTime) return bTime - aTime;
+      return (playOrder.get(a.id) || 0) - (playOrder.get(b.id) || 0);
+    })[0];
+
+    const startFromPlayId = latestPlay ? getRootIdForPlay(latestPlay) : undefined;
+    setPendingSelection({
+      type: 'new-play',
+      conceptId,
+      conceptName,
+      startFromPlayId
+    });
     navigate('/builder');
   };
 
@@ -369,17 +525,161 @@ const PlaybookPage: React.FC = () => {
           children.forEach((child) => buildSequences(child, nextPath));
         };
         roots.forEach((root) => buildSequences(root, []));
+        const orderedSequences = sequences
+          .map((sequence, index) => ({ sequence, index }))
+          .sort((a, b) => {
+            const leafA = a.sequence[a.sequence.length - 1];
+            const leafB = b.sequence[b.sequence.length - 1];
+            const orderA = typeof leafA?.sequenceOrder === 'number' ? leafA.sequenceOrder : a.index;
+            const orderB = typeof leafB?.sequenceOrder === 'number' ? leafB.sequenceOrder : b.index;
+            if (orderA !== orderB) return orderA - orderB;
+            return a.sequence.map((play) => play.name).join(' > ').localeCompare(b.sequence.map((play) => play.name).join(' > '));
+          })
+          .map((entry) => entry.sequence);
 
         return {
           id: conceptId,
           isIndependent,
           name: conceptName,
           playCount: plays.length,
-          sequences
+          sequences: orderedSequences
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [savedPlays]);
+
+  useEffect(() => {
+    setExpandedConcepts((prev) => {
+      const next: Record<string, boolean> = {};
+      playConcepts.forEach((concept) => {
+        next[concept.id] = prev[concept.id] ?? true;
+      });
+      return next;
+    });
+    setSequenceNameDrafts((prev) => {
+      const next = { ...prev };
+      playConcepts.forEach((concept) => {
+        concept.sequences.forEach((sequence, idx) => {
+          const key = getSequenceKey(concept.id, sequence, idx);
+          if (!(key in next)) {
+            next[key] = getSequenceDisplayName(sequence, idx);
+          }
+        });
+      });
+      return next;
+    });
+  }, [playConcepts]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(sequenceNameSaveTimersRef.current).forEach((timerId) => {
+        window.clearTimeout(timerId);
+      });
+    };
+  }, []);
+
+  const toggleConcept = (conceptId: string) => {
+    setExpandedConcepts((prev) => ({ ...prev, [conceptId]: !prev[conceptId] }));
+  };
+
+  const getSequenceDisplayName = useCallback((sequence: Play[], sequenceIndex: number) => {
+    const named = [...sequence].reverse().find((play) => (play.sequenceName || '').trim().length > 0);
+    return named?.sequenceName?.trim() || `Sequence ${sequenceIndex + 1}`;
+  }, []);
+
+  const getSequenceKey = (conceptId: string, sequence: Play[], sequenceIndex: number) =>
+    `${conceptId}::${sequence[sequence.length - 1]?.id || sequenceIndex}`;
+
+  const persistSequenceName = async (conceptId: string, sequenceIndex: number, nextName: string) => {
+    const concept = playConcepts.find((entry) => entry.id === conceptId);
+    if (!concept) return;
+    const sequence = concept.sequences[sequenceIndex];
+    if (!sequence || sequence.length === 0) return;
+    const trimmed = nextName.trim();
+    const occurrence = new Map<string, number>();
+    concept.sequences.forEach((seq) => {
+      seq.forEach((play) => {
+        occurrence.set(play.id, (occurrence.get(play.id) || 0) + 1);
+      });
+    });
+    const targetIds = new Set(
+      sequence
+        .filter((play, idx) => sequence.length === 1 || occurrence.get(play.id) === 1 || idx === sequence.length - 1)
+        .map((play) => play.id)
+    );
+    const updatedPlays = savedPlays.map((play) => (
+      targetIds.has(play.id)
+        ? { ...play, sequenceName: trimmed || undefined }
+        : play
+    ));
+    setSavedPlays(updatedPlays);
+    if (isFirestoreEnabled()) {
+      await Promise.all(
+        updatedPlays
+          .filter((play) => targetIds.has(play.id))
+          .map((play) => savePlayToFirestore(play).catch((error) => {
+            console.error('Failed to update sequence name in Firestore', error);
+          }))
+      );
+    }
+  };
+
+  const updateSequenceNameDraft = (conceptId: string, sequenceIndex: number, sequence: Play[], nextName: string) => {
+    const key = getSequenceKey(conceptId, sequence, sequenceIndex);
+    setSequenceNameDrafts((prev) => ({ ...prev, [key]: nextName }));
+    const existingTimer = sequenceNameSaveTimersRef.current[key];
+    if (existingTimer) {
+      window.clearTimeout(existingTimer);
+    }
+    sequenceNameSaveTimersRef.current[key] = window.setTimeout(() => {
+      persistSequenceName(conceptId, sequenceIndex, nextName);
+      delete sequenceNameSaveTimersRef.current[key];
+    }, 450);
+  };
+
+  const reorderSequenceOrder = async (conceptId: string, fromIndex: number, toIndex: number) => {
+    const concept = playConcepts.find((entry) => entry.id === conceptId);
+    if (!concept) return;
+    if (fromIndex === toIndex) return;
+    if (fromIndex < 0 || toIndex < 0 || fromIndex >= concept.sequences.length || toIndex >= concept.sequences.length) return;
+
+    const reordered = [...concept.sequences];
+    const [moved] = reordered.splice(fromIndex, 1);
+    if (!moved) return;
+    reordered.splice(toIndex, 0, moved);
+
+    const leafOrder = new Map<string, number>();
+    reordered.forEach((sequence, idx) => {
+      const leaf = sequence[sequence.length - 1];
+      if (leaf) leafOrder.set(leaf.id, idx);
+    });
+
+    const playsToPersist: Play[] = [];
+    const updatedPlays = savedPlays.map((play) => {
+      const nextOrder = leafOrder.get(play.id);
+      if (typeof nextOrder !== 'number') return play;
+      if (play.sequenceOrder === nextOrder) return play;
+      const updated = { ...play, sequenceOrder: nextOrder };
+      playsToPersist.push(updated);
+      return updated;
+    });
+    setSavedPlays(updatedPlays);
+
+    if (isFirestoreEnabled() && playsToPersist.length > 0) {
+      await Promise.all(
+        playsToPersist.map((play) =>
+          savePlayToFirestore(play).catch((error) => {
+            console.error('Failed to update sequence order in Firestore', error);
+          })
+        )
+      );
+    }
+  };
+
+  const moveSequenceOrder = async (conceptId: string, sequenceIndex: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? sequenceIndex - 1 : sequenceIndex + 1;
+    await reorderSequenceOrder(conceptId, sequenceIndex, targetIndex);
+  };
 
   const renderPlayCard = (play: Play, branchRootId?: string, branchChildId?: string): React.ReactNode => {
     const snapshotWidth = 135;
@@ -540,7 +840,35 @@ const PlaybookPage: React.FC = () => {
         }}
         className="rounded-xl border border-slate-800 bg-slate-900/60 hover:border-emerald-500/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 transition-colors cursor-pointer p-3"
       >
-        <h3 className="text-sm font-bold text-sky-200 truncate mb-3" title={play.name}>{play.name}</h3>
+        <div className="mb-3">
+          <h3 className="text-sm font-bold text-sky-200 truncate" title={play.name}>{play.name}</h3>
+          <div className="mt-1.5 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                deletePlayStepOnly(play.id);
+              }}
+              className="rounded border border-slate-700 bg-slate-900/70 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-slate-300 hover:bg-slate-800 hover:text-white"
+              title="Delete this step only and relink following steps"
+            >
+              Delete Step
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                deletePlaySubtree(play.id);
+              }}
+              className="rounded border border-red-900/60 bg-red-950/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-red-300 hover:bg-red-900/40 hover:text-red-100"
+              title="Delete this play and downstream plays"
+            >
+              Delete Play
+            </button>
+          </div>
+        </div>
         <div className="rounded-lg border border-slate-800 bg-emerald-950/70 overflow-hidden">
           <svg width={snapshotWidth} height={snapshotHeight} viewBox={`0 0 ${snapshotWidth} ${snapshotHeight}`} className="block w-full h-auto">
             <rect x="0" y="0" width={snapshotWidth} height={snapshotHeight} fill="#065f46" />
@@ -635,43 +963,163 @@ const PlaybookPage: React.FC = () => {
           </div>
         </div>
 
-        <section className="mt-8">
-          {playConcepts.length === 0 ? (
-            <div className="py-16 text-center text-slate-500 italic">No plays saved yet.</div>
-          ) : (
-            <div className="space-y-6">
-              {playConcepts.map((concept) => (
-                <div key={concept.id} className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 shadow-lg">
+        <section className="mt-8 flex gap-6">
+          {playConcepts.length > 0 && (
+            <aside className="hidden lg:block w-56 shrink-0">
+              <div className="sticky top-4 rounded-2xl border border-slate-800 bg-slate-900/50 p-3 max-h-[calc(100vh-9rem)] overflow-y-auto">
+                <div className="space-y-2">
+                  {playConcepts.map((concept) => {
+                    const conceptOpen = expandedConcepts[concept.id] ?? true;
+                    return (
+                      <div key={`nav-${concept.id}`} className="rounded-lg border border-slate-800 bg-slate-950/40">
+                        <button
+                          type="button"
+                          onClick={() => toggleConcept(concept.id)}
+                          className="w-full flex items-center justify-between px-2.5 py-2 text-left"
+                        >
+                          <span className={`text-[11px] font-bold uppercase tracking-[0.12em] ${concept.isIndependent ? 'text-slate-300' : 'text-emerald-300'}`}>{concept.name}</span>
+                          {conceptOpen ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
+                        </button>
+                        {!concept.isIndependent && (
+                          <div className="px-2.5 pb-1.5">
+                            <button
+                              type="button"
+                              onClick={() => createNewSequenceInConcept(concept.id, concept.name)}
+                              className="w-full rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+                            >
+                              New Sequence
+                            </button>
+                          </div>
+                        )}
+                        {conceptOpen && (
+                          <div className="pb-2 px-1.5 space-y-1">
+                            {concept.sequences.map((sequence, sequenceIndex) => {
+                              const sequenceKey = `${concept.id}::${sequenceIndex}`;
+                              const sequenceName = getSequenceDisplayName(sequence, sequenceIndex);
+                              const draftKey = getSequenceKey(concept.id, sequence, sequenceIndex);
+                              const draftName = sequenceNameDrafts[draftKey] ?? sequenceName;
+                              return (
+                                <div
+                                  key={`nav-seq-${concept.id}-${sequenceIndex}`}
+                                  draggable
+                                  onDragStart={(e) => {
+                                    setDraggingSequence({ conceptId: concept.id, sequenceIndex });
+                                    e.dataTransfer.setData('text/plain', sequenceKey);
+                                    e.dataTransfer.effectAllowed = 'move';
+                                  }}
+                                  onDragOver={(e) => {
+                                    if (!draggingSequence) return;
+                                    if (draggingSequence.conceptId !== concept.id) return;
+                                    if (draggingSequence.sequenceIndex === sequenceIndex) return;
+                                    e.preventDefault();
+                                    setDragOverSequenceKey(sequenceKey);
+                                  }}
+                                  onDrop={async (e) => {
+                                    e.preventDefault();
+                                    if (!draggingSequence) return;
+                                    if (draggingSequence.conceptId !== concept.id) return;
+                                    await reorderSequenceOrder(concept.id, draggingSequence.sequenceIndex, sequenceIndex);
+                                    setDraggingSequence(null);
+                                    setDragOverSequenceKey(null);
+                                  }}
+                                  onDragEnd={() => {
+                                    setDraggingSequence(null);
+                                    setDragOverSequenceKey(null);
+                                  }}
+                                  className={`rounded-md border bg-slate-900/30 ${dragOverSequenceKey === sequenceKey ? 'border-emerald-500/70' : 'border-slate-800/80'}`}
+                                >
+                                  <div className="w-full flex items-center justify-between gap-1 px-2 py-1.5 text-left">
+                                    <div className="shrink-0 text-slate-500 cursor-grab">
+                                      <GripVertical size={12} />
+                                    </div>
+                                    <input
+                                      value={draftName}
+                                      onChange={(e) => updateSequenceNameDraft(concept.id, sequenceIndex, sequence, e.target.value)}
+                                      className="min-w-0 flex-1 bg-transparent border border-transparent hover:border-slate-700/70 focus:border-indigo-500/60 rounded px-1 py-0.5 text-[10px] uppercase tracking-[0.16em] text-slate-300 font-bold focus:outline-none"
+                                    />
+                                    <div className="w-4" />
+                                  </div>
+                                  <div className="px-2 pb-1">
+                                    <div className="h-1" />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </aside>
+          )}
+          <div className="flex-1 min-w-0">
+            {playConcepts.length === 0 ? (
+              <div className="py-16 text-center text-slate-500 italic">No plays saved yet.</div>
+            ) : (
+              <div className="space-y-6">
+                {playConcepts.map((concept) => (
+                  <div key={concept.id} className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 shadow-lg">
                   <div className="flex items-center justify-between gap-3">
                     <h2 className={`text-sm font-extrabold uppercase tracking-[0.18em] ${concept.isIndependent ? 'text-slate-300' : 'text-emerald-300'}`}>
                       {concept.name}
                     </h2>
+                    {!concept.isIndependent && (
+                      <button
+                        type="button"
+                        onClick={() => createNewSequenceInConcept(concept.id, concept.name)}
+                        className="px-2.5 py-1 rounded-md border border-slate-700 bg-slate-900/70 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
+                      >
+                        New Sequence
+                      </button>
+                    )}
                   </div>
-                  <div className="mt-3 space-y-3">
-                    {concept.sequences.map((sequence, sequenceIndex) => (
-                      <div key={`${concept.id}-sequence-${sequenceIndex}`} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                        <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-3">
-                          Sequence {sequenceIndex + 1}
-                        </div>
-                        <div className="flex items-center gap-2 overflow-x-auto pb-1">
-                          {sequence.map((play, stepIndex) => (
-                            <div key={`${concept.id}-${sequenceIndex}-${play.id}-${stepIndex}`} className="flex items-center gap-2">
-                              <div className="min-w-[170px] max-w-[190px]">
-                                {renderPlayCard(play, sequence[0]?.id, sequence[1]?.id)}
+                    <div className="mt-3 space-y-3">
+                      {concept.sequences.map((sequence, sequenceIndex) => (
+                        <div key={`${concept.id}-sequence-${sequenceIndex}`} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                          {(() => {
+                            const sequenceName = getSequenceDisplayName(sequence, sequenceIndex);
+                            const draftKey = getSequenceKey(concept.id, sequence, sequenceIndex);
+                            const draftName = sequenceNameDrafts[draftKey] ?? sequenceName;
+                            return (
+                          <div className="mb-3 flex items-center justify-between gap-2">
+                            <input
+                              value={draftName}
+                              onChange={(e) => updateSequenceNameDraft(concept.id, sequenceIndex, sequence, e.target.value)}
+                              className="min-w-0 flex-1 bg-transparent border border-transparent hover:border-slate-700/70 focus:border-indigo-500/60 rounded px-1 py-0.5 text-[10px] uppercase tracking-widest text-slate-300 font-bold focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => deleteSequenceBranch(sequence, concept.sequences)}
+                              className="rounded border border-red-900/60 bg-red-950/30 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.12em] text-red-300 hover:bg-red-900/40 hover:text-red-100"
+                              title="Delete this sequence branch"
+                            >
+                              Delete Sequence
+                            </button>
+                          </div>
+                            );
+                          })()}
+                          <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                            {sequence.map((play, stepIndex) => (
+                              <div key={`${concept.id}-${sequenceIndex}-${play.id}-${stepIndex}`} className="flex items-center gap-2">
+                                <div className="min-w-[170px] max-w-[190px]">
+                                  {renderPlayCard(play, sequence[0]?.id, sequence[1]?.id)}
+                                </div>
+                                {stepIndex < sequence.length - 1 && (
+                                  <div className="text-slate-500 text-[12px] font-bold px-1">→</div>
+                                )}
                               </div>
-                              {stepIndex < sequence.length - 1 && (
-                                <div className="text-slate-500 text-[12px] font-bold px-1">→</div>
-                              )}
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
         </section>
 
         <AccountModal

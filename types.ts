@@ -44,6 +44,8 @@ export interface Play {
   name: string;
   conceptId?: string;
   conceptName?: string;
+  sequenceName?: string;
+  sequenceOrder?: number;
   players: Player[];
   force: Force;
   description: string;

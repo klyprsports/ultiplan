@@ -24,7 +24,7 @@ export const savePlaysToStorage = (plays: Play[]) => {
 
 export type PendingSelection =
   | { type: 'play'; id: string; branchRootId?: string; branchChildId?: string }
-  | { type: 'new-play' };
+  | { type: 'new-play'; conceptId?: string; conceptName?: string; sequenceName?: string; startFromPlayId?: string };
 
 export const loadPendingSelection = (): PendingSelection | null => {
   const saved = localStorage.getItem(PENDING_SELECTION_KEY);
@@ -122,6 +122,8 @@ export const normalizePlay = (play: {
   name: string;
   conceptId?: string;
   conceptName?: string;
+  sequenceName?: string;
+  sequenceOrder?: number;
   force: Force;
   description: string;
   players: Player[];
@@ -141,6 +143,8 @@ export const normalizePlay = (play: {
   name: play.name.trim(),
   conceptId: play.conceptId?.trim() || '',
   conceptName: play.conceptName?.trim() || '',
+  sequenceName: play.sequenceName?.trim() || '',
+  sequenceOrder: typeof play.sequenceOrder === 'number' ? play.sequenceOrder : null,
   force: play.force,
   description: play.description.trim(),
   players: normalizePlayPlayers(play.players),

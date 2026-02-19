@@ -77,6 +77,8 @@ const App: React.FC = () => {
   const [playConceptId, setPlayConceptId] = useState<string | null>(null);
   const [playConceptName, setPlayConceptName] = useState('');
   const [newPlayConceptName, setNewPlayConceptName] = useState<string | null>(null);
+  const [newPlayConceptId, setNewPlayConceptId] = useState<string | null>(null);
+  const [newPlayStartFromPlayId, setNewPlayStartFromPlayId] = useState<string | null>(null);
   const [startFromPlayId, setStartFromPlayId] = useState<string | null>(null);
   const [startLocked, setStartLocked] = useState(false);
   const [sequenceRunPlayIds, setSequenceRunPlayIds] = useState<string[] | null>(null);
@@ -327,10 +329,13 @@ const App: React.FC = () => {
     const pending = loadPendingSelection();
     if (!pending) return;
     if (pending.type === 'new-play') {
-      const conceptName = consumePendingConceptDraft();
-      const trimmedConcept = conceptName?.trim() || '';
-      setTempPlayName(trimmedConcept);
-      setNewPlayConceptName(trimmedConcept || null);
+      const conceptNameFromPending = pending.conceptName?.trim() || '';
+      const conceptNameFromDraft = consumePendingConceptDraft()?.trim() || '';
+      const resolvedConceptName = conceptNameFromPending || conceptNameFromDraft;
+      setTempPlayName(pending.conceptId ? 'New Play' : resolvedConceptName);
+      setNewPlayConceptId(pending.conceptId || null);
+      setNewPlayConceptName(resolvedConceptName || null);
+      setNewPlayStartFromPlayId(pending.startFromPlayId || null);
       setShowNewPlayModal(true);
       clearPendingSelection();
       return;
@@ -1059,12 +1064,14 @@ const App: React.FC = () => {
     const sharedTeamIds = existing?.sharedTeamIds || [];
     const conceptId = existing?.conceptId || playConceptId || undefined;
     const conceptName = (existing?.conceptName || playConceptName || '').trim() || undefined;
+    const sequenceName = (existing?.sequenceName || '').trim() || undefined;
     const newPlay: Play = {
       id: editingPlayId || generateId(),
       ownerId: playOwnerId || currentUser?.uid,
       name: finalName,
       conceptId,
       conceptName,
+      sequenceName,
       players,
       force,
       description: playDescription,
@@ -1118,12 +1125,14 @@ const App: React.FC = () => {
     const sharedTeamIds = existing?.sharedTeamIds || [];
     const conceptId = existing?.conceptId || playConceptId || undefined;
     const conceptName = (existing?.conceptName || playConceptName || '').trim() || undefined;
+    const sequenceName = (existing?.sequenceName || '').trim() || undefined;
     const nextPlay: Play = {
       id: generateId(),
       ownerId: playOwnerId || currentUser?.uid,
       name: `${playName} - Next`,
       conceptId,
       conceptName,
+      sequenceName,
       players: nextPlayers,
       force,
       description: '',
@@ -1688,7 +1697,7 @@ const App: React.FC = () => {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/50">
               <h2 className="text-lg font-bold flex items-center gap-2"><Plus size={20} className="text-indigo-400" /> Start New Isolated Play</h2>
-              <button onClick={() => { setShowNewPlayModal(false); setNewPlayConceptName(null); }} className="text-slate-500 hover:text-white transition-colors"><X size={20} /></button>
+              <button onClick={() => { setShowNewPlayModal(false); setNewPlayConceptId(null); setNewPlayConceptName(null); setNewPlayStartFromPlayId(null); }} className="text-slate-500 hover:text-white transition-colors"><X size={20} /></button>
             </div>
             <div className="p-6 space-y-4">
               <div>
@@ -1697,23 +1706,49 @@ const App: React.FC = () => {
               </div>
             </div>
             <div className="p-6 bg-slate-800/30 flex gap-3">
-              <button onClick={() => { setShowNewPlayModal(false); setNewPlayConceptName(null); }} className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all">Cancel</button>
+              <button onClick={() => { setShowNewPlayModal(false); setNewPlayConceptId(null); setNewPlayConceptName(null); setNewPlayStartFromPlayId(null); }} className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all">Cancel</button>
               <button onClick={() => {
                 const currentUser = getCurrentUser();
                 const conceptDraft = newPlayConceptName?.trim() || '';
-                setPlayers([]);
+                const parentPlay = newPlayStartFromPlayId
+                  ? savedPlays.find((play) => play.id === newPlayStartFromPlayId)
+                  : undefined;
+                const parentEndPositions = parentPlay
+                  ? getSequenceAnchorPositionsByLabel(parentPlay.players, parentPlay.throws || [])
+                  : null;
+                const nextPlayers = parentPlay
+                  ? parentPlay.players.map((player) => {
+                    const key = `${player.team}:${player.label}`;
+                    const target = parentEndPositions?.get(key);
+                    return {
+                      ...player,
+                      x: target?.x ?? player.x,
+                      y: target?.y ?? player.y,
+                      path: [],
+                      pathStartOffset: 0,
+                      hasDisc: target?.hasDisc ?? false,
+                      autoAssigned: false,
+                      coversOffenseId: undefined
+                    };
+                  })
+                  : [];
+                setPlayers(nextPlayers);
                 setThrows([]);
-                setPlayName(tempPlayName || conceptDraft || 'New Isolated Play');
+                const trimmedPlayName = tempPlayName.trim();
+                const defaultName = conceptDraft ? 'New Play' : 'New Isolated Play';
+                setPlayName(trimmedPlayName || defaultName);
                 setEditingPlayId(null);
                 setPlayDescription('');
                 setPlayOwnerId(currentUser?.uid || null);
                 setPlayCreatedBy(currentUser?.uid || null);
                 setPlaySourceId(null);
-                setPlayConceptId(conceptDraft ? generateId() : null);
+                setPlayConceptId(newPlayConceptId || (conceptDraft ? generateId() : null));
                 setPlayConceptName(conceptDraft);
-                setStartFromPlayId(null);
-                setStartLocked(false);
+                setStartFromPlayId(parentPlay?.id || null);
+                setStartLocked(Boolean(parentPlay));
+                setNewPlayConceptId(null);
                 setNewPlayConceptName(null);
+                setNewPlayStartFromPlayId(null);
                 setShowNewPlayModal(false);
                 stopAnimation();
               }} className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition-all">Create</button>
