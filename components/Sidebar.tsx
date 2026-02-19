@@ -303,7 +303,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 </div>
               )}
-              {selectedPlayer.team === 'offense' && (
+              {selectedPlayer.team === 'offense' && !selectedPlayer.hasDisc && (
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Role</label>
@@ -349,15 +349,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 </div>
               )}
-              <div>
-                <div className="flex items-center justify-between mb-1"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><Gauge size={12} /> Top Speed</label><span className="text-xs font-mono text-indigo-400 font-bold">{(selectedPlayer.speed).toFixed(1)} yd/s</span></div>
-                <input type="range" min="2" max="13" step="0.5" value={selectedPlayer.speed} onChange={(e) => onUpdateSpeed?.(selectedPlayer.id, parseFloat(e.target.value))} disabled={isPlaying} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-1"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><Activity size={12} /> Explosiveness</label><span className="text-xs font-mono text-indigo-400 font-bold">{(selectedPlayer.acceleration).toFixed(1)} yd/s²</span></div>
-                <input type="range" min="1" max="15" step="0.5" value={selectedPlayer.acceleration} onChange={(e) => onUpdateAcceleration?.(selectedPlayer.id, parseFloat(e.target.value))} disabled={isPlaying} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
-              </div>
-              {selectedPlayer.team === 'offense' && (
+              {!selectedPlayer.hasDisc && (
+                <div>
+                  <div className="flex items-center justify-between mb-1"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><Gauge size={12} /> Top Speed</label><span className="text-xs font-mono text-indigo-400 font-bold">{(selectedPlayer.speed).toFixed(1)} yd/s</span></div>
+                  <input type="range" min="2" max="13" step="0.5" value={selectedPlayer.speed} onChange={(e) => onUpdateSpeed?.(selectedPlayer.id, parseFloat(e.target.value))} disabled={isPlaying} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+                </div>
+              )}
+              {!selectedPlayer.hasDisc && (
+                <div>
+                  <div className="flex items-center justify-between mb-1"><label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><Activity size={12} /> Explosiveness</label><span className="text-xs font-mono text-indigo-400 font-bold">{(selectedPlayer.acceleration).toFixed(1)} yd/s²</span></div>
+                  <input type="range" min="1" max="15" step="0.5" value={selectedPlayer.acceleration} onChange={(e) => onUpdateAcceleration?.(selectedPlayer.id, parseFloat(e.target.value))} disabled={isPlaying} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+                </div>
+              )}
+              {selectedPlayer.team === 'offense' && !selectedPlayer.hasDisc && (
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-1.5">Route Start</label>

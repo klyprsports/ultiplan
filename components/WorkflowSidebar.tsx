@@ -17,9 +17,6 @@ interface WorkflowSidebarProps {
   onApplyPresetFormation: (formation: 'vertical' | 'side' | 'ho') => void;
   onCreateCustomFormation: () => void;
   onAutoAssignDefense: () => void;
-  onSavePlay: (name?: string) => void;
-  canSavePlay: boolean;
-  playSaveReason: string;
   saveStatus: 'idle' | 'saving' | 'saved';
   onBuildNextPlay: () => void;
   canBuildNextPlay: boolean;
@@ -53,9 +50,6 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
   onApplyPresetFormation,
   onCreateCustomFormation,
   onAutoAssignDefense,
-  onSavePlay,
-  canSavePlay,
-  playSaveReason,
   saveStatus,
   onBuildNextPlay,
   canBuildNextPlay,
@@ -100,6 +94,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
         />
       </div>
 
+      {!isStartLocked && (
       <div className={sectionClass} data-tour-id="workflow-offense">
         <div className="flex items-center justify-between">
           <h3 className={sectionTitle}>Step 1 · Offense</h3>
@@ -175,7 +170,9 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
           </div>
         </div>
       </div>
+      )}
 
+      {!isStartLocked && (
       <div className={sectionClass} data-tour-id="workflow-force">
         <div className="flex items-center justify-between">
           <h3 className={sectionTitle}>Step 2 · Force</h3>
@@ -188,7 +185,9 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
           </div>
         </div>
       </div>
+      )}
 
+      {!isStartLocked && (
       <div className={sectionClass} data-tour-id="workflow-defense">
         <div className="flex items-center justify-between">
           <h3 className={sectionTitle}>Step 3 · Defense</h3>
@@ -228,6 +227,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
           </button>
         </div>
       </div>
+      )}
 
       <div className={sectionClass} data-tour-id="workflow-draw">
         <div className="flex items-center justify-between">
@@ -240,14 +240,11 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
 
       <div className="mt-auto">
         <div className={`${sectionClass} flex flex-col gap-2`} data-tour-id="workflow-save">
-          <button
-            onClick={() => onSavePlay()}
-            disabled={!canSavePlay || saveStatus === 'saving'}
-            title={playSaveReason || 'Save current play'}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors text-[10px] font-bold tracking-widest uppercase bg-emerald-500/90 hover:bg-emerald-400 text-emerald-950 border-emerald-500/60 disabled:opacity-50"
-          >
-            {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved' : 'Save Play'}
-          </button>
+          {saveStatus !== 'idle' && (
+            <div className="w-full text-center text-[10px] font-bold tracking-widest uppercase text-slate-400">
+              Autosave: {saveStatus === 'saving' ? 'Saving...' : 'Saved'}
+            </div>
+          )}
           <button
             onClick={onBuildNextPlay}
             disabled={!canBuildNextPlay}

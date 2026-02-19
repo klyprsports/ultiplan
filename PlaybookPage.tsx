@@ -199,8 +199,8 @@ const PlaybookPage: React.FC = () => {
     setShowOnboardingIntro(false);
   };
 
-  const openPlay = (id: string) => {
-    setPendingSelection({ type: 'play', id });
+  const openPlay = (id: string, branchRootId?: string, branchChildId?: string) => {
+    setPendingSelection({ type: 'play', id, branchRootId, branchChildId });
     navigate('/builder');
   };
 
@@ -381,7 +381,7 @@ const PlaybookPage: React.FC = () => {
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [savedPlays]);
 
-  const renderPlayCard = (play: Play): React.ReactNode => {
+  const renderPlayCard = (play: Play, branchRootId?: string, branchChildId?: string): React.ReactNode => {
     const snapshotWidth = 135;
     const snapshotHeight = 371;
     const fieldWidth = 40;
@@ -531,11 +531,11 @@ const PlaybookPage: React.FC = () => {
       <div
         role="button"
         tabIndex={0}
-        onClick={() => openPlay(play.id)}
+        onClick={() => openPlay(play.id, branchRootId, branchChildId)}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            openPlay(play.id);
+            openPlay(play.id, branchRootId, branchChildId);
           }
         }}
         className="rounded-xl border border-slate-800 bg-slate-900/60 hover:border-emerald-500/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 transition-colors cursor-pointer p-3"
@@ -657,7 +657,7 @@ const PlaybookPage: React.FC = () => {
                           {sequence.map((play, stepIndex) => (
                             <div key={`${concept.id}-${sequenceIndex}-${play.id}-${stepIndex}`} className="flex items-center gap-2">
                               <div className="min-w-[170px] max-w-[190px]">
-                                {renderPlayCard(play)}
+                                {renderPlayCard(play, sequence[0]?.id, sequence[1]?.id)}
                               </div>
                               {stepIndex < sequence.length - 1 && (
                                 <div className="text-slate-500 text-[12px] font-bold px-1">→</div>

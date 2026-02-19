@@ -23,7 +23,7 @@ export const savePlaysToStorage = (plays: Play[]) => {
 };
 
 export type PendingSelection =
-  | { type: 'play'; id: string }
+  | { type: 'play'; id: string; branchRootId?: string; branchChildId?: string }
   | { type: 'new-play' };
 
 export const loadPendingSelection = (): PendingSelection | null => {

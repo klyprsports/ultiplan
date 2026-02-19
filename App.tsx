@@ -1,6 +1,6 @@
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Plus, X, Save } from 'lucide-react';
+import { Plus, X } from 'lucide-react';
 import Field from './components/Field';
 import Sidebar from './components/Sidebar';
 import HeaderBar from './components/HeaderBar';
@@ -57,14 +57,10 @@ const App: React.FC = () => {
   const animationRef = useRef<number | null>(null);
   const lastTickRef = useRef<number>(0);
   const [showNewPlayModal, setShowNewPlayModal] = useState(false);
-  const [showSavePlayModal, setShowSavePlayModal] = useState(false);
   const [tempPlayName, setTempPlayName] = useState('');
-  const [tempSavePlayName, setTempSavePlayName] = useState('');
   const [activeFormation, setActiveFormation] = useState<'vertical' | 'side' | 'ho' | 'custom' | null>(null);
   const [playbookLoaded, setPlaybookLoaded] = useState(false);
-  const [showAuthPrompt, setShowAuthPrompt] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [pendingSaveAction, setPendingSaveAction] = useState<null | { type: 'play'; name?: string }>(null);
   const [authUser, setAuthUser] = useState<ReturnType<typeof getCurrentUser>>(getCurrentUser());
   const [showAccountModal, setShowAccountModal] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
@@ -87,6 +83,7 @@ const App: React.FC = () => {
   const [sequenceRunCursor, setSequenceRunCursor] = useState(0);
   const [pendingAutoStartPlayId, setPendingAutoStartPlayId] = useState<string | null>(null);
   const [sequenceToast, setSequenceToast] = useState<string | null>(null);
+  const [preferredSequenceBranchByRoot, setPreferredSequenceBranchByRoot] = useState<Record<string, string>>({});
   const suppressUnsavedPopGuardRef = useRef(false);
 
   const isAnimationActive = animationState !== 'IDLE';
@@ -271,8 +268,8 @@ const App: React.FC = () => {
     },
     {
       id: 'save',
-      title: 'Save your play',
-      body: 'Save when you are ready, then reuse it from your playbook.',
+      title: 'Autosave',
+      body: 'Your play autosaves as you edit so you can return from the playbook anytime.',
       target: '[data-tour-id="workflow-save"]'
     }
   ]), []);
@@ -341,6 +338,12 @@ const App: React.FC = () => {
     if (pending.type === 'play') {
       const play = savedPlays.find(p => p.id === pending.id);
       if (play) {
+        if (pending.branchRootId && pending.branchChildId) {
+          setPreferredSequenceBranchByRoot((prev) => {
+            if (prev[pending.branchRootId!] === pending.branchChildId) return prev;
+            return { ...prev, [pending.branchRootId!]: pending.branchChildId! };
+          });
+        }
         loadPlay(play);
         clearPendingSelection();
         return;
@@ -1047,26 +1050,15 @@ const App: React.FC = () => {
   };
 
   // PERSISTENCE
-  const savePlay = (overrideName?: string) => {
-    const finalName = (overrideName ?? playName).trim();
-    const normalizedName = finalName.toLowerCase();
-    if (normalizedName === 'new isolated play' || normalizedName === 'new play') {
-      setTempSavePlayName('');
-      setShowSavePlayModal(true);
-      return;
-    }
+  const persistPlay = useCallback((overrideName?: string) => {
     const currentUser = getCurrentUser();
-    if (isFirestoreEnabled() && (!currentUser || currentUser.isAnonymous)) {
-      setPendingSaveAction({ type: 'play', name: finalName });
-      setShowAuthPrompt(true);
-      return;
-    }
+    const finalNameRaw = (overrideName ?? playName).trim();
+    const finalName = finalNameRaw || 'New Isolated Play';
     const existing = savedPlays.find((p) => p.id === editingPlayId);
     const visibility = existing?.visibility || 'private';
     const sharedTeamIds = existing?.sharedTeamIds || [];
     const conceptId = existing?.conceptId || playConceptId || undefined;
     const conceptName = (existing?.conceptName || playConceptName || '').trim() || undefined;
-    setSaveStatus('saving');
     const newPlay: Play = {
       id: editingPlayId || generateId(),
       ownerId: playOwnerId || currentUser?.uid,
@@ -1085,11 +1077,12 @@ const App: React.FC = () => {
       startFromPlayId: startFromPlayId || undefined,
       startLocked: startLocked || undefined
     };
+    setSaveStatus('saving');
     setSavedPlays(prev => {
-      const existing = prev.findIndex(p => p.id === newPlay.id);
-      if (existing !== -1) {
+      const existingIndex = prev.findIndex(p => p.id === newPlay.id);
+      if (existingIndex !== -1) {
         const next = [...prev];
-        next[existing] = newPlay;
+        next[existingIndex] = newPlay;
         return next;
       }
       return [...prev, newPlay];
@@ -1104,11 +1097,9 @@ const App: React.FC = () => {
     if (isFirestoreEnabled()) {
       savePlayToFirestore(newPlay).catch((error) => console.error('Failed to save play to Firestore', error));
     }
-    setTimeout(() => {
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 2000);
-    }, 600);
-  };
+    setSaveStatus('saved');
+    window.setTimeout(() => setSaveStatus('idle'), 1200);
+  }, [editingPlayId, force, playConceptId, playConceptName, playCreatedBy, playDescription, playName, playOwnerId, playSourceId, players, savedPlays, startFromPlayId, startLocked, throws]);
 
   const buildNextPlayInSequence = () => {
     if (!editingPlayId) return;
@@ -1176,7 +1167,7 @@ const App: React.FC = () => {
     setSelectedPlayerId(null);
     setMode(InteractionMode.SELECT);
     stopAnimation();
-    setSequenceToast(`Step ${currentStep + 1} created and linked. Draw routes, then save.`);
+    setSequenceToast(`Step ${currentStep + 1} created and linked. Draw routes for the next step.`);
     window.setTimeout(() => setSequenceToast(null), 2600);
     if (isFirestoreEnabled()) {
       savePlayToFirestore(nextPlay).catch((error) => console.error('Failed to save play to Firestore', error));
@@ -1268,18 +1259,33 @@ const App: React.FC = () => {
     const ids = ancestorChain.reverse();
     const seen = new Set(ids);
 
-    // Continue from the selected play to its descendants.
+    // Continue from the selected play to descendants only while the chain is unambiguous.
+    // If a node has multiple children (a branch), stop instead of arbitrarily picking one.
     let descendantCursor = startId;
     while (true) {
       const children = childMap.get(descendantCursor) || [];
-      const nextChild = children.find((child) => !seen.has(child.id));
-      if (!nextChild) break;
+      const availableChildren = children.filter((child) => !seen.has(child.id));
+      if (availableChildren.length !== 1) break;
+      const [nextChild] = availableChildren;
       ids.push(nextChild.id);
       seen.add(nextChild.id);
       descendantCursor = nextChild.id;
     }
 
     return ids;
+  }, [savedPlays]);
+
+  const getAncestorChainToRoot = useCallback((startId: string) => {
+    const byId = new Map(savedPlays.map((play) => [play.id, play]));
+    const chain: string[] = [];
+    const seen = new Set<string>();
+    let cursor: string | null = startId;
+    while (cursor && !seen.has(cursor)) {
+      seen.add(cursor);
+      chain.push(cursor);
+      cursor = byId.get(cursor)?.startFromPlayId || null;
+    }
+    return chain.reverse();
   }, [savedPlays]);
 
   const loadPlay = (play: Play) => {
@@ -1304,6 +1310,18 @@ const App: React.FC = () => {
     setSelectedPlayerId(null);
     setMode(InteractionMode.SELECT);
   };
+
+  useEffect(() => {
+    if (!editingPlayId) return;
+    const chain = getAncestorChainToRoot(editingPlayId);
+    if (chain.length < 2) return;
+    const rootId = chain[0];
+    const branchChildId = chain[1];
+    setPreferredSequenceBranchByRoot((prev) => {
+      if (prev[rootId] === branchChildId) return prev;
+      return { ...prev, [rootId]: branchChildId };
+    });
+  }, [editingPlayId, getAncestorChainToRoot]);
 
   const runSequenceFromCurrentPlay = () => {
     if (!editingPlayId) return;
@@ -1425,15 +1443,6 @@ const App: React.FC = () => {
     }
   }, [startLocked, startFromPlayId, editingPlayId, savedPlays, getSequenceAnchorPositionsByLabel, alignPlayersToEndState]);
 
-  const hasUnsavedPlay = useMemo(() => {
-    if (players.length === 0) return false;
-    const current = normalizePlay({ name: playName, force, description: playDescription, players, throws: throws || [] });
-    return !savedPlays.some(p => {
-      const saved = normalizePlay({ name: p.name, force: p.force, description: p.description || '', players: p.players, throws: p.throws || [] });
-      return JSON.stringify(saved) === JSON.stringify(current);
-    });
-  }, [players, playName, force, playDescription, savedPlays, throws]);
-
   const hasUnsavedBuilderChanges = useMemo(() => {
     const current = normalizePlay({
       name: playName,
@@ -1479,11 +1488,17 @@ const App: React.FC = () => {
     window.dispatchEvent(new PopStateEvent('popstate'));
   }, [confirmLeaveBuilder]);
 
-  const playSaveReason = !players.some(p => p.team === 'offense')
-    ? 'Add at least one offensive player before saving.'
-    : !hasUnsavedPlay
-      ? 'No changes from an existing saved play.'
-      : '';
+  useEffect(() => {
+    if (!hasUnsavedBuilderChanges) return;
+    const isBrandNewEmptyDraft = !editingPlayId && players.length === 0;
+    if (isBrandNewEmptyDraft) return;
+    const timeoutId = window.setTimeout(() => {
+      persistPlay();
+    }, 500);
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [editingPlayId, hasUnsavedBuilderChanges, persistPlay, players.length]);
 
   useEffect(() => {
     if (!hasUnsavedBuilderChanges) return;
@@ -1562,21 +1577,33 @@ const App: React.FC = () => {
     if (!isAnimationActive && animationTime === 0) {
       const offense = players.filter((p) => p.team === 'offense');
       const holderId = offense.find((p) => p.hasDisc)?.id ?? offense[0]?.id ?? null;
-      return { holderId, flight: null as { x: number; y: number; rotation: number } | null, turnoverTime: null as number | null, path: null as Point[] | null };
+      const firstThrow = throwPlans[0];
+      const previewPath = firstThrow
+        ? Array.from({ length: 25 }, (_, i) => {
+            const t = firstThrow.releaseTime + (firstThrow.duration * i) / 24;
+            return getDiscPosition(firstThrow, t);
+          })
+        : null;
+      return {
+        holderId,
+        flight: null as { x: number; y: number; rotation: number } | null,
+        turnoverTime: null as number | null,
+        path: previewPath
+      };
     }
     return getDiscStateAtTime(animationTime);
-  }, [isAnimationActive, players, animationTime, getDiscStateAtTime]);
+  }, [isAnimationActive, players, animationTime, getDiscPosition, getDiscStateAtTime, throwPlans]);
 
   const canBuildNextPlay = Boolean(editingPlayId);
-  const buildNextPlayReason = editingPlayId ? '' : 'Save this play before starting a sequence.';
+  const buildNextPlayReason = editingPlayId ? '' : 'Make a change and wait for autosave before starting a sequence.';
   const canBuildPreviousPlay = Boolean(editingPlayId);
-  const buildPreviousPlayReason = editingPlayId ? '' : 'Save this play before creating a previous step.';
+  const buildPreviousPlayReason = editingPlayId ? '' : 'Make a change and wait for autosave before creating a previous step.';
   const canUnlinkSequence = Boolean(editingPlayId && startFromPlayId);
   const unlinkSequenceReason = canUnlinkSequence ? '' : 'This play is not currently linked to a previous step.';
   const currentSequenceRunIds = editingPlayId ? getSequenceRunIds(editingPlayId) : [];
   const canRunSequence = currentSequenceRunIds.length > 1;
   const runSequenceReason = !editingPlayId
-    ? 'Save this play before running a sequence.'
+    ? 'Make a change and wait for autosave before running a sequence.'
     : currentSequenceRunIds.length <= 1
       ? 'No linked next play found for this sequence.'
       : '';
@@ -1598,6 +1625,59 @@ const App: React.FC = () => {
     const root = ordered[0];
     const current = ordered[ordered.length - 1];
     return `Sequence: ${root.name} > ${current.name}`;
+  }, [editingPlayId, savedPlays]);
+
+  const sequencePlays = useMemo(() => {
+    if (!editingPlayId) return [];
+    const byId = new Map(savedPlays.map((play) => [play.id, play]));
+    const childMap = new Map<string, Play[]>();
+    savedPlays.forEach((play) => {
+      if (!play.startFromPlayId) return;
+      const siblings = childMap.get(play.startFromPlayId) || [];
+      siblings.push(play);
+      childMap.set(play.startFromPlayId, siblings);
+    });
+
+    const ancestorChain = getAncestorChainToRoot(editingPlayId);
+    if (ancestorChain.length === 0) return [];
+    const ids: string[] = [...ancestorChain];
+    const seen = new Set(ids);
+    const rootId = ancestorChain[0];
+    let cursor = ancestorChain[ancestorChain.length - 1];
+
+    while (cursor) {
+      const children = (childMap.get(cursor) || []).filter((child) => !seen.has(child.id));
+      if (children.length === 0) break;
+      let nextChild: Play | undefined;
+
+      if (cursor === rootId && children.length > 1) {
+        const preferred = preferredSequenceBranchByRoot[rootId];
+        nextChild = children.find((child) => child.id === preferred) || children[0];
+      } else if (children.length === 1) {
+        [nextChild] = children;
+      } else {
+        break;
+      }
+
+      if (!nextChild) break;
+      ids.push(nextChild.id);
+      seen.add(nextChild.id);
+      cursor = nextChild.id;
+    }
+
+    return ids
+      .map((id) => {
+        const play = byId.get(id);
+        return play ? { id: play.id, name: play.name } : null;
+      })
+      .filter((item): item is { id: string; name: string } => Boolean(item));
+  }, [editingPlayId, getAncestorChainToRoot, preferredSequenceBranchByRoot, savedPlays]);
+
+  const openSequencePlayFromSidebar = useCallback((targetPlayId: string) => {
+    if (targetPlayId === editingPlayId) return;
+    const targetPlay = savedPlays.find((play) => play.id === targetPlayId);
+    if (!targetPlay) return;
+    loadPlay(targetPlay);
   }, [editingPlayId, savedPlays]);
 
   return (
@@ -1642,87 +1722,10 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Save Play Modal */}
-      {showSavePlayModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/50">
-              <h2 className="text-lg font-bold flex items-center gap-2"><Save size={20} className="text-indigo-400" /> Name your play</h2>
-              <button onClick={() => setShowSavePlayModal(false)} className="text-slate-500 hover:text-white transition-colors"><X size={20} /></button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Play Name</label>
-                <input
-                  autoFocus
-                  type="text"
-                  value={tempSavePlayName}
-                  onChange={(e) => setTempSavePlayName(e.target.value)}
-                  placeholder="e.g. Vert Stack Deep Look"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-                />
-              </div>
-            </div>
-            <div className="p-6 bg-slate-800/30 flex gap-3">
-              <button onClick={() => setShowSavePlayModal(false)} className="flex-1 py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all">Cancel</button>
-              <button
-                onClick={() => {
-                  const name = tempSavePlayName.trim();
-                  if (!name) return;
-                  setShowSavePlayModal(false);
-                  savePlay(name);
-                }}
-                className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl shadow-lg shadow-indigo-600/20 transition-all"
-              >
-                Save Play
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showAuthPrompt && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/50">
-              <h2 className="text-base font-bold">Sign in to save</h2>
-              <button onClick={() => { setShowAuthPrompt(false); setPendingSaveAction(null); }} className="text-slate-500 hover:text-white transition-colors"><X size={20} /></button>
-            </div>
-            <div className="p-6 space-y-3">
-              <p className="text-sm text-slate-300">
-                Sign in to save plays to your playbook.
-              </p>
-              <button
-                onClick={() => {
-                  setShowAuthPrompt(false);
-                  setShowAuthModal(true);
-                }}
-                className="w-full px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest bg-slate-100 text-slate-900 hover:bg-white shadow-lg"
-              >
-                Sign in
-              </button>
-              <button
-                onClick={() => { setShowAuthPrompt(false); setPendingSaveAction(null); }}
-                className="w-full px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700"
-              >
-                Not now
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       <AuthModal
         isOpen={showAuthModal}
         onClose={() => {
           setShowAuthModal(false);
-          const currentUser = getCurrentUser();
-          if (!currentUser || currentUser.isAnonymous) return;
-          const pending = pendingSaveAction;
-          setPendingSaveAction(null);
-          if (pending?.type === 'play') {
-            savePlay(pending.name);
-          }
         }}
       />
 
@@ -1789,6 +1792,9 @@ const App: React.FC = () => {
         }}
         sublabel="Builder"
         sequenceLabel={sequenceBreadcrumb}
+        sequencePlays={sequencePlays}
+        currentPlayId={editingPlayId}
+        onOpenSequencePlay={openSequencePlayFromSidebar}
         user={authUser}
       />
       {sequenceToast && (
@@ -1814,9 +1820,6 @@ const App: React.FC = () => {
           onApplyPresetFormation={applyFormationNearOwnEndzone}
           onCreateCustomFormation={() => { setActiveFormation('custom'); setMode(InteractionMode.ADD_OFFENSE); }}
           onAutoAssignDefense={autoAssignDefense}
-          onSavePlay={savePlay}
-          canSavePlay={players.some(p => p.team === 'offense')}
-          playSaveReason={playSaveReason}
           saveStatus={saveStatus}
           onBuildNextPlay={buildNextPlayInSequence}
           canBuildNextPlay={canBuildNextPlay}

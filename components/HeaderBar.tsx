@@ -12,6 +12,9 @@ interface HeaderBarProps {
   onOpenAuth?: () => void;
   sublabel?: string;
   sequenceLabel?: string;
+  sequencePlays?: Array<{ id: string; name: string }>;
+  currentPlayId?: string | null;
+  onOpenSequencePlay?: (playId: string) => void;
   user: User | null;
 }
 
@@ -24,6 +27,9 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
   onOpenAuth,
   sublabel,
   sequenceLabel,
+  sequencePlays = [],
+  currentPlayId,
+  onOpenSequencePlay,
   user
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -60,6 +66,29 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
               Playbook
             </button>
           </>
+        )}
+        {sequencePlays.length > 1 && (
+          <div className="ml-2 flex items-center gap-1.5 max-w-[520px] overflow-x-auto pb-0.5">
+            {sequencePlays.map((play, idx) => {
+              const isCurrent = currentPlayId === play.id;
+              return (
+                <button
+                  key={`${play.id}-${idx}`}
+                  type="button"
+                  onClick={() => onOpenSequencePlay?.(play.id)}
+                  disabled={isCurrent}
+                  className={`shrink-0 rounded-md border px-2 py-1 text-[10px] font-semibold tracking-wide transition-colors ${
+                    isCurrent
+                      ? 'border-indigo-500/50 bg-indigo-500/20 text-indigo-200'
+                      : 'border-slate-700 bg-slate-900/60 text-slate-300 hover:bg-slate-800 hover:border-slate-600'
+                  }`}
+                  title={play.name}
+                >
+                  {idx + 1}. {play.name}
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
       <div className="flex items-center gap-3">
