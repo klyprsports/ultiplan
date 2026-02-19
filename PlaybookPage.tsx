@@ -356,7 +356,7 @@ const PlaybookPage: React.FC = () => {
 
         const isIndependent = conceptId === '__independent__';
         const conceptName = isIndependent
-          ? 'No Concept'
+          ? 'Isolated Plays'
           : (plays.find((play) => play.conceptName?.trim())?.conceptName?.trim() || 'Untitled Concept');
         const sequences: Play[][] = [];
         const buildSequences = (node: Play, path: Play[]) => {
@@ -382,6 +382,151 @@ const PlaybookPage: React.FC = () => {
   }, [savedPlays]);
 
   const renderPlayCard = (play: Play): React.ReactNode => {
+    const snapshotWidth = 135;
+    const snapshotHeight = 371;
+    const fieldWidth = 40;
+    const fieldHeight = 110;
+    const offense = play.players.filter((p) => p.team === 'offense');
+    const defense = play.players.filter((p) => p.team === 'defense');
+    const holderId = offense.find((p) => p.hasDisc)?.id;
+    const allPlayers = play.players;
+
+    const toSnapshot = (x: number, y: number) => ({
+      x: (x / fieldWidth) * snapshotWidth,
+      y: (y / fieldHeight) * snapshotHeight
+    });
+
+    const getThrowSpeed = (power: 'soft' | 'medium' | 'hard') => {
+      if (power === 'soft') return 8;
+      if (power === 'hard') return 16;
+      return 12;
+    };
+
+    const getPlayerPositionAtTime = (player: Play['players'][number], time: number) => {
+      const startOffset = player.team === 'offense' ? Math.max(0, player.pathStartOffset ?? 0) : 0;
+      const adjustedTime = time - startOffset;
+      if (player.path.length === 0 || adjustedTime <= 0) return { x: player.x, y: player.y };
+      const acc = Math.max(0.1, player.acceleration || 0.1);
+      const topSpeed = Math.max(0.1, player.speed || 0.1);
+      const dec = acc * 2.0;
+      const points = [{ x: player.x, y: player.y }, ...player.path];
+      const vertexSpeeds = [0];
+      for (let i = 1; i < points.length - 1; i++) {
+        const pPrev = points[i - 1];
+        const pCurr = points[i];
+        const pNext = points[i + 1];
+        const v1 = { x: pCurr.x - pPrev.x, y: pCurr.y - pPrev.y };
+        const v2 = { x: pNext.x - pCurr.x, y: pNext.y - pCurr.y };
+        const mag1 = Math.hypot(v1.x, v1.y);
+        const mag2 = Math.hypot(v2.x, v2.y);
+        if (mag1 === 0 || mag2 === 0) {
+          vertexSpeeds.push(0);
+          continue;
+        }
+        const cosTheta = (v1.x * v2.x + v1.y * v2.y) / (mag1 * mag2);
+        const speedFactor = Math.max(0, (1 + cosTheta) / 2);
+        vertexSpeeds.push(topSpeed * speedFactor);
+      }
+      vertexSpeeds.push(0);
+
+      let tRem = adjustedTime;
+      for (let i = 0; i < points.length - 1; i++) {
+        const p1 = points[i];
+        const p2 = points[i + 1];
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const len = Math.hypot(dx, dy);
+        if (len === 0) continue;
+        const v0 = vertexSpeeds[i];
+        const v1 = vertexSpeeds[i + 1];
+        const dAccToTop = (topSpeed ** 2 - v0 ** 2) / (2 * acc);
+        const dDecToV1 = (topSpeed ** 2 - v1 ** 2) / (2 * dec);
+        let tSegTotal = 0;
+        let distAtTRem = 0;
+        if (dAccToTop + dDecToV1 <= len) {
+          const tAcc = (topSpeed - v0) / acc;
+          const tDec = (topSpeed - v1) / dec;
+          const dCruise = len - dAccToTop - dDecToV1;
+          const tCruise = dCruise / topSpeed;
+          tSegTotal = tAcc + tCruise + tDec;
+          if (tRem <= tSegTotal) {
+            if (tRem <= tAcc) {
+              distAtTRem = v0 * tRem + 0.5 * acc * tRem ** 2;
+            } else if (tRem <= tAcc + tCruise) {
+              distAtTRem = dAccToTop + topSpeed * (tRem - tAcc);
+            } else {
+              const tr = tRem - tAcc - tCruise;
+              distAtTRem = dAccToTop + dCruise + (topSpeed * tr - 0.5 * dec * tr ** 2);
+            }
+            const r = distAtTRem / len;
+            return { x: p1.x + dx * r, y: p1.y + dy * r };
+          }
+        } else {
+          const vPeakSq = (2 * len + v0 ** 2 / acc + v1 ** 2 / dec) / (1 / acc + 1 / dec);
+          const vPeak = Math.sqrt(vPeakSq);
+          const tAcc = (vPeak - v0) / acc;
+          const tDec = (vPeak - v1) / dec;
+          tSegTotal = tAcc + tDec;
+          if (tRem <= tSegTotal) {
+            if (tRem <= tAcc) {
+              distAtTRem = v0 * tRem + 0.5 * acc * tRem ** 2;
+            } else {
+              const tr = tRem - tAcc;
+              distAtTRem = (v0 * tAcc + 0.5 * acc * tAcc ** 2) + (vPeak * tr - 0.5 * dec * tr ** 2);
+            }
+            const r = distAtTRem / len;
+            return { x: p1.x + dx * r, y: p1.y + dy * r };
+          }
+        }
+        tRem -= tSegTotal;
+      }
+      return points[points.length - 1];
+    };
+
+    const throwPaths = (play.throws || []).map((thr) => {
+      const thrower = allPlayers.find((p) => p.id === thr.throwerId);
+      if (!thrower) return null;
+      const throwMode = thr.mode === 'space' ? 'space' : 'receiver';
+      const receiver = thr.receiverId ? allPlayers.find((p) => p.id === thr.receiverId) : null;
+      const throwerAtRelease = getPlayerPositionAtTime(thrower, thr.releaseTime);
+      const start = { x: throwerAtRelease.x + 1.2, y: throwerAtRelease.y - 1.2 };
+      const receiverAtRelease = throwMode === 'space'
+        ? (thr.targetPoint ? { x: thr.targetPoint.x, y: thr.targetPoint.y } : null)
+        : (receiver ? getPlayerPositionAtTime(receiver, thr.releaseTime) : null);
+      if (!receiverAtRelease) return null;
+      const speed = getThrowSpeed(thr.power);
+      const dx = receiverAtRelease.x - start.x;
+      const dy = receiverAtRelease.y - start.y;
+      const dist = Math.hypot(dx, dy);
+      const minTravel = 0.5;
+      const dirX = dist > 0 ? dx / dist : 0;
+      const dirY = dist > 0 ? dy / dist : 1;
+      const travelDist = Math.max(minTravel, dist);
+      const duration = Math.max(0.2, travelDist / speed);
+      const end = throwMode === 'space'
+        ? { x: receiverAtRelease.x, y: receiverAtRelease.y }
+        : (dist < minTravel
+          ? { x: start.x + dirX * minTravel, y: start.y + dirY * minTravel }
+          : getPlayerPositionAtTime(receiver as Play['players'][number], thr.releaseTime + duration));
+      const samples = 20;
+      const points = Array.from({ length: samples + 1 }, (_, i) => {
+        const t = i / samples;
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const ux = dx / dist;
+        const uy = dy / dist;
+        const px = -uy;
+        const py = ux;
+        const curve = thr.angle * dist * 0.15 * Math.sin(Math.PI * t);
+        return {
+          x: start.x + dx * t + px * curve,
+          y: start.y + dy * t + py * curve
+        };
+      });
+      return points.map((p) => toSnapshot(p.x, p.y));
+    }).filter((p): p is Array<{ x: number; y: number }> => Boolean(p));
+
     return (
       <div
         role="button"
@@ -393,52 +538,53 @@ const PlaybookPage: React.FC = () => {
             openPlay(play.id);
           }
         }}
-        className="rounded-xl border border-slate-800 bg-slate-900/60 hover:border-emerald-500/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 transition-colors cursor-pointer"
+        className="rounded-xl border border-slate-800 bg-slate-900/60 hover:border-emerald-500/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 transition-colors cursor-pointer p-3"
       >
-        <div className="flex items-center justify-between gap-3 p-3">
-          <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-bold text-sky-200 truncate" title={play.name}>{play.name}</h3>
-            <div className="mt-1 flex items-center gap-2 text-[9px] uppercase tracking-widest">
-              {play.ownerId === user?.uid ? (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                                openSharing(play);
-                  }}
-                  className="px-2 py-1 rounded-full bg-slate-800 text-slate-200 hover:bg-slate-700 transition-colors"
-                  aria-label="Change sharing level"
-                  title="Change sharing level"
-                >
-                  {play.visibility || 'private'}
-                </button>
-              ) : (
-                <span className="px-2 py-1 rounded-full bg-slate-800 text-slate-300">{play.visibility || 'private'}</span>
-              )}
-            </div>
-          </div>
-          {play.ownerId === user?.uid && (
-            <div className="flex items-center gap-1 shrink-0">
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openMoveConceptModal(play);
-                }}
-                className="px-2 py-1 rounded-lg text-[10px] uppercase tracking-widest text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-              >
-                Move
-              </button>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  deletePlay(play.id);
-                }}
-                className="p-2 rounded-lg text-slate-500 hover:text-red-400 hover:bg-slate-800 transition-colors"
-                aria-label="Delete play"
-              >
-                <Trash2 size={16} />
-              </button>
-            </div>
-          )}
+        <h3 className="text-sm font-bold text-sky-200 truncate mb-3" title={play.name}>{play.name}</h3>
+        <div className="rounded-lg border border-slate-800 bg-emerald-950/70 overflow-hidden">
+          <svg width={snapshotWidth} height={snapshotHeight} viewBox={`0 0 ${snapshotWidth} ${snapshotHeight}`} className="block w-full h-auto">
+            <rect x="0" y="0" width={snapshotWidth} height={snapshotHeight} fill="#065f46" />
+            <rect x="0" y="0" width={snapshotWidth} height={snapshotHeight} fill="none" stroke="rgba(255,255,255,0.45)" strokeWidth="1" />
+            <line x1="0" y1={(20 / 110) * snapshotHeight} x2={snapshotWidth} y2={(20 / 110) * snapshotHeight} stroke="rgba(255,255,255,0.35)" strokeWidth="1" />
+            <line x1="0" y1={(90 / 110) * snapshotHeight} x2={snapshotWidth} y2={(90 / 110) * snapshotHeight} stroke="rgba(255,255,255,0.35)" strokeWidth="1" />
+            {allPlayers.map((p) => {
+              const pts = [{ x: p.x, y: p.y }, ...p.path].map((q) => toSnapshot(q.x, q.y));
+              if (pts.length <= 1) return null;
+              return (
+                <polyline
+                  key={`snap-route-${p.id}`}
+                  points={pts.map((q) => `${q.x},${q.y}`).join(' ')}
+                  fill="none"
+                  stroke={p.team === 'offense' ? 'rgba(96,165,250,0.7)' : 'rgba(248,113,113,0.7)'}
+                  strokeWidth="1.5"
+                  strokeDasharray="4 2"
+                />
+              );
+            })}
+            {throwPaths.map((path, index) => (
+              <polyline
+                key={`snap-throw-${index}`}
+                points={path.map((q) => `${q.x},${q.y}`).join(' ')}
+                fill="none"
+                stroke="rgba(250,204,21,0.95)"
+                strokeWidth="1.5"
+                strokeDasharray="5 3"
+              />
+            ))}
+            {offense.map((p) => {
+              const pos = toSnapshot(p.x, p.y);
+              return (
+                <g key={`snap-off-${p.id}`} transform={`translate(${pos.x},${pos.y})`}>
+                  <circle r="4.2" fill="#2563eb" stroke="rgba(255,255,255,0.3)" strokeWidth="1" />
+                  {holderId === p.id && <circle cx="5.8" cy="-5.8" r="2.2" fill="#f8fafc" stroke="#94a3b8" strokeWidth="0.8" />}
+                </g>
+              );
+            })}
+            {defense.map((p) => {
+              const pos = toSnapshot(p.x, p.y);
+              return <circle key={`snap-def-${p.id}`} cx={pos.x} cy={pos.y} r="4.2" fill="#dc2626" stroke="rgba(255,255,255,0.3)" strokeWidth="1" />;
+            })}
+          </svg>
         </div>
       </div>
     );
@@ -484,7 +630,7 @@ const PlaybookPage: React.FC = () => {
               onClick={createNewPlay}
               className="px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest bg-sky-500 text-sky-950 hover:bg-sky-400 shadow-lg shadow-sky-500/30"
             >
-              New Play
+              New Isolated Play
             </button>
           </div>
         </div>
@@ -501,26 +647,26 @@ const PlaybookPage: React.FC = () => {
                       {concept.name}
                     </h2>
                   </div>
-                  <div className="mt-3 overflow-x-auto">
-                    <div className="grid grid-flow-col auto-cols-[minmax(230px,1fr)] gap-4 pb-1">
-                      {concept.sequences.map((sequence, sequenceIndex) => (
-                        <div key={`${concept.id}-sequence-${sequenceIndex}`} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
-                          <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-3">
-                            Sequence {sequenceIndex + 1}
-                          </div>
-                          <div className="space-y-2">
-                            {sequence.map((play, stepIndex) => (
-                              <div key={`${concept.id}-${sequenceIndex}-${play.id}-${stepIndex}`} className="space-y-2">
-                                {renderPlayCard(play)}
-                                {stepIndex < sequence.length - 1 && (
-                                  <div className="text-center text-slate-600 text-[10px] uppercase tracking-widest">then</div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
+                  <div className="mt-3 space-y-3">
+                    {concept.sequences.map((sequence, sequenceIndex) => (
+                      <div key={`${concept.id}-sequence-${sequenceIndex}`} className="rounded-xl border border-slate-800 bg-slate-950/40 p-3">
+                        <div className="text-[10px] uppercase tracking-widest text-slate-400 font-bold mb-3">
+                          Sequence {sequenceIndex + 1}
                         </div>
-                      ))}
-                    </div>
+                        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                          {sequence.map((play, stepIndex) => (
+                            <div key={`${concept.id}-${sequenceIndex}-${play.id}-${stepIndex}`} className="flex items-center gap-2">
+                              <div className="min-w-[170px] max-w-[190px]">
+                                {renderPlayCard(play)}
+                              </div>
+                              {stepIndex < sequence.length - 1 && (
+                                <div className="text-slate-500 text-[12px] font-bold px-1">→</div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))}
@@ -656,7 +802,7 @@ const PlaybookPage: React.FC = () => {
                     onChange={(e) => setMoveConceptChoice(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
                   >
-                    <option value="__independent__">No Concept</option>
+                    <option value="__independent__">Isolated Plays</option>
                     {conceptOptions.map((option) => (
                       <option key={option.id} value={option.id}>{option.name}</option>
                     ))}

@@ -11,6 +11,7 @@ interface HeaderBarProps {
   onShareApp?: () => void;
   onOpenAuth?: () => void;
   sublabel?: string;
+  sequenceLabel?: string;
   user: User | null;
 }
 
@@ -22,6 +23,7 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
   onShareApp,
   onOpenAuth,
   sublabel,
+  sequenceLabel,
   user
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -39,6 +41,11 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
             <div className="text-[10px] text-slate-400 flex items-center gap-2">
               <BookOpen size={12} className="text-emerald-400" />
               {sublabel}
+            </div>
+          )}
+          {sequenceLabel && (
+            <div className="text-[10px] text-indigo-300/90 truncate max-w-[420px]" title={sequenceLabel}>
+              {sequenceLabel}
             </div>
           )}
         </div>

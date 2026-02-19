@@ -23,12 +23,24 @@ import {
 interface ThrowControlsState {
   isOpen: boolean;
   isSelectingReceiver: boolean;
-  throwDraft: { throwerId: string; receiverId: string | null; releaseTime: number; angle: number; power: 'soft' | 'medium' | 'hard' } | null;
+  isSelectingThrowTarget: boolean;
+  throwDraft: {
+    throwerId: string;
+    mode: 'receiver' | 'space';
+    receiverId: string | null;
+    targetPoint: { x: number; y: number } | null;
+    releaseTime: number;
+    angle: number;
+    power: 'soft' | 'medium' | 'hard';
+  } | null;
   maxReleaseTime: number;
   onToggle: (isOpen: boolean) => void;
   onEdit: (throwId: string) => void;
+  onModeChange: (mode: 'receiver' | 'space') => void;
   onSelectReceiver: () => void;
+  onSelectTargetPoint: () => void;
   onClearReceiver: () => void;
+  onClearTargetPoint: () => void;
   onReleaseTimeChange: (value: number) => void;
   onAngleChange: (value: number) => void;
   onPowerChange: (value: 'soft' | 'medium' | 'hard') => void;
@@ -41,7 +53,16 @@ interface SidebarProps {
   description: string;
   onUpdateDescription: (desc: string) => void;
   players: Player[];
-  throws: { id: string; throwerId: string; receiverId: string; releaseTime: number; angle: number; power: 'soft' | 'medium' | 'hard' }[];
+  throws: {
+    id: string;
+    throwerId: string;
+    receiverId?: string;
+    mode?: 'receiver' | 'space';
+    targetPoint?: { x: number; y: number };
+    releaseTime: number;
+    angle: number;
+    power: 'soft' | 'medium' | 'hard';
+  }[];
   selectedPlayerId: string | null;
   onDeletePlayer: (id: string) => void;
   onClearPath: (id: string) => void;
@@ -183,6 +204,11 @@ const Sidebar: React.FC<SidebarProps> = ({
               )}
             </div>
           </div>
+          {!isAnimationActive && hasPlayers && !canStartSequence && (
+            <div className="mt-2 text-[10px] text-slate-500 leading-relaxed max-w-[220px]">
+              To build a sequence: save this play, then click <span className="text-slate-300 font-semibold">Create Next Play in Sequence</span>.
+            </div>
+          )}
         </div>
         <div className="flex items-center justify-between mb-3" data-tour-id="tactical-notes">
           <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
@@ -249,11 +275,14 @@ const Sidebar: React.FC<SidebarProps> = ({
                       .filter((t) => t.throwerId === selectedPlayer.id || t.receiverId === selectedPlayer.id)
                       .map((t) => {
                         const thrower = players.find((p) => p.id === t.throwerId);
-                        const receiver = players.find((p) => p.id === t.receiverId);
+                        const receiver = t.receiverId ? players.find((p) => p.id === t.receiverId) : null;
                         const role = t.throwerId === selectedPlayer.id ? 'Throw' : 'Catch';
+                        const targetLabel = t.mode === 'space'
+                          ? (t.targetPoint ? `Space (${t.targetPoint.x.toFixed(1)}, ${t.targetPoint.y.toFixed(1)})` : 'Space')
+                          : receiver?.label || 'Receiver';
                         return (
                           <div key={t.id} className="flex items-center justify-between">
-                            <span>{role}: {thrower?.label} → {receiver?.label}</span>
+                            <span>{role}: {thrower?.label} → {targetLabel}</span>
                             <div className="flex items-center gap-2">
                               <span className="text-[10px] text-slate-400 font-mono">{t.releaseTime.toFixed(1)}s</span>
                               {t.throwerId === selectedPlayer.id && (
@@ -367,32 +396,83 @@ const Sidebar: React.FC<SidebarProps> = ({
                     )}
                     {selectedPlayer.hasDisc && throwControls.isOpen && (
                       <div className="mt-2 rounded-lg border border-slate-700 bg-slate-900/60 p-3 space-y-3">
-                        <div className="text-[10px] uppercase tracking-widest text-slate-500">Receiver</div>
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="text-xs text-slate-200">
-                            {throwControls.throwDraft?.receiverId
-                              ? `Receiver set: ${players.find((p) => p.id === throwControls.throwDraft?.receiverId)?.label ?? ''}`
-                              : throwControls.isSelectingReceiver
-                                ? 'Click a receiver on the field...'
-                                : 'No receiver selected'}
-                          </div>
-                          <div className="flex gap-2">
+                        <div>
+                          <div className="text-[10px] uppercase tracking-widest text-slate-500">Target Mode</div>
+                          <div className="mt-2 grid grid-cols-2 gap-2">
                             <button
-                              onClick={throwControls.onSelectReceiver}
-                              className="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest bg-slate-800 text-slate-200 hover:bg-slate-700"
+                              onClick={() => throwControls.onModeChange('receiver')}
+                              className={`px-2 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest border ${throwControls.throwDraft?.mode !== 'space' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}`}
                             >
-                              {throwControls.throwDraft?.receiverId ? 'Change' : 'Select'}
+                              To Receiver
                             </button>
-                            {throwControls.throwDraft?.receiverId && (
-                              <button
-                                onClick={throwControls.onClearReceiver}
-                                className="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest bg-slate-800 text-slate-200 hover:bg-slate-700"
-                              >
-                                Clear
-                              </button>
-                            )}
+                            <button
+                              onClick={() => throwControls.onModeChange('space')}
+                              className={`px-2 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest border ${throwControls.throwDraft?.mode === 'space' ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'}`}
+                            >
+                              To Space
+                            </button>
                           </div>
                         </div>
+
+                        {throwControls.throwDraft?.mode === 'space' ? (
+                          <div>
+                            <div className="text-[10px] uppercase tracking-widest text-slate-500">Target Point</div>
+                            <div className="mt-1 flex items-center justify-between gap-2">
+                              <div className="text-xs text-slate-200">
+                                {throwControls.throwDraft?.targetPoint
+                                  ? `Point set: (${throwControls.throwDraft.targetPoint.x.toFixed(1)}, ${throwControls.throwDraft.targetPoint.y.toFixed(1)})`
+                                  : throwControls.isSelectingThrowTarget
+                                    ? 'Click a target point on the field...'
+                                    : 'No target point selected'}
+                              </div>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={throwControls.onSelectTargetPoint}
+                                  className="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest bg-slate-800 text-slate-200 hover:bg-slate-700"
+                                >
+                                  {throwControls.throwDraft?.targetPoint ? 'Change' : 'Select'}
+                                </button>
+                                {throwControls.throwDraft?.targetPoint && (
+                                  <button
+                                    onClick={throwControls.onClearTargetPoint}
+                                    className="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest bg-slate-800 text-slate-200 hover:bg-slate-700"
+                                  >
+                                    Clear
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="text-[10px] uppercase tracking-widest text-slate-500">Receiver</div>
+                            <div className="mt-1 flex items-center justify-between gap-2">
+                              <div className="text-xs text-slate-200">
+                                {throwControls.throwDraft?.receiverId
+                                  ? `Receiver set: ${players.find((p) => p.id === throwControls.throwDraft?.receiverId)?.label ?? ''}`
+                                  : throwControls.isSelectingReceiver
+                                    ? 'Click a receiver on the field...'
+                                    : 'No receiver selected'}
+                              </div>
+                              <div className="flex gap-2">
+                                <button
+                                  onClick={throwControls.onSelectReceiver}
+                                  className="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest bg-slate-800 text-slate-200 hover:bg-slate-700"
+                                >
+                                  {throwControls.throwDraft?.receiverId ? 'Change' : 'Select'}
+                                </button>
+                                {throwControls.throwDraft?.receiverId && (
+                                  <button
+                                    onClick={throwControls.onClearReceiver}
+                                    className="px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-widest bg-slate-800 text-slate-200 hover:bg-slate-700"
+                                  >
+                                    Clear
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
 
                         <div>
                           <div className="text-[10px] uppercase tracking-widest text-slate-500">Release Time</div>
@@ -460,7 +540,11 @@ const Sidebar: React.FC<SidebarProps> = ({
                           </button>
                           <button
                             onClick={throwControls.onConfirm}
-                            disabled={!throwControls.throwDraft?.receiverId}
+                            disabled={
+                              throwControls.throwDraft?.mode === 'space'
+                                ? !throwControls.throwDraft?.targetPoint
+                                : !throwControls.throwDraft?.receiverId
+                            }
                             className="flex-1 px-2 py-1.5 rounded-md text-[10px] font-bold uppercase tracking-widest bg-emerald-500 text-emerald-950 hover:bg-emerald-400 disabled:opacity-50"
                           >
                             {throwControls.isEditing ? 'Save Throw' : 'Add Throw'}

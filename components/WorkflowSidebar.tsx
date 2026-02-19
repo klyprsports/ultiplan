@@ -24,6 +24,12 @@ interface WorkflowSidebarProps {
   onBuildNextPlay: () => void;
   canBuildNextPlay: boolean;
   buildNextPlayReason: string;
+  onBuildPreviousPlay: () => void;
+  canBuildPreviousPlay: boolean;
+  buildPreviousPlayReason: string;
+  onUnlinkSequence: () => void;
+  canUnlinkSequence: boolean;
+  unlinkSequenceReason: string;
   maxPlayersPerTeam: number;
   usedOffenseLabels: number[];
   usedDefenseLabels: number[];
@@ -54,6 +60,12 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
   onBuildNextPlay,
   canBuildNextPlay,
   buildNextPlayReason,
+  onBuildPreviousPlay,
+  canBuildPreviousPlay,
+  buildPreviousPlayReason,
+  onUnlinkSequence,
+  canUnlinkSequence,
+  unlinkSequenceReason,
   maxPlayersPerTeam,
   usedOffenseLabels,
   usedDefenseLabels,
@@ -242,7 +254,23 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
             title={buildNextPlayReason || 'Build the next play in this sequence'}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors text-[10px] font-bold tracking-widest uppercase bg-indigo-500/90 hover:bg-indigo-400 text-indigo-950 border-indigo-500/60 disabled:opacity-50"
           >
-            Continue with Next Play
+            Create Next Play in Sequence
+          </button>
+          <button
+            onClick={onBuildPreviousPlay}
+            disabled={!canBuildPreviousPlay}
+            title={buildPreviousPlayReason || 'Create a previous play step and link this play after it'}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors text-[10px] font-bold tracking-widest uppercase bg-slate-700 hover:bg-slate-600 text-slate-100 border-slate-600 disabled:opacity-50"
+          >
+            Create Previous Play
+          </button>
+          <button
+            onClick={onUnlinkSequence}
+            disabled={!canUnlinkSequence}
+            title={unlinkSequenceReason || 'Unlink this play from its previous sequence step'}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors text-[10px] font-bold tracking-widest uppercase bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700 disabled:opacity-50"
+          >
+            Unlink from Sequence
           </button>
         </div>
       </div>

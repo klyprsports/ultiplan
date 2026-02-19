@@ -31,7 +31,7 @@ const App: React.FC = () => {
   const [mode, setMode] = useState<InteractionMode>(InteractionMode.SELECT);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   const [force, setForce] = useState<Force>('home');
-  const [playName, setPlayName] = useState('New Play');
+  const [playName, setPlayName] = useState('New Isolated Play');
   const [playDescription, setPlayDescription] = useState('');
   const [savedPlays, setSavedPlays] = useState<Play[]>([]);
   const [editingPlayId, setEditingPlayId] = useState<string | null>(null);
@@ -41,12 +41,15 @@ const App: React.FC = () => {
   const [showThrowControls, setShowThrowControls] = useState(false);
   const [throwDraft, setThrowDraft] = useState<{
     throwerId: string;
+    mode: 'receiver' | 'space';
     receiverId: string | null;
+    targetPoint: Point | null;
     releaseTime: number;
     angle: number;
     power: 'soft' | 'medium' | 'hard';
   } | null>(null);
   const [isSelectingReceiver, setIsSelectingReceiver] = useState(false);
+  const [isSelectingThrowTarget, setIsSelectingThrowTarget] = useState(false);
   const [editingThrowId, setEditingThrowId] = useState<string | null>(null);
   
   const [animationState, setAnimationState] = useState<AnimationState>('IDLE');
@@ -83,6 +86,8 @@ const App: React.FC = () => {
   const [sequenceRunPlayIds, setSequenceRunPlayIds] = useState<string[] | null>(null);
   const [sequenceRunCursor, setSequenceRunCursor] = useState(0);
   const [pendingAutoStartPlayId, setPendingAutoStartPlayId] = useState<string | null>(null);
+  const [sequenceToast, setSequenceToast] = useState<string | null>(null);
+  const suppressUnsavedPopGuardRef = useRef(false);
 
   const isAnimationActive = animationState !== 'IDLE';
 
@@ -449,29 +454,37 @@ const App: React.FC = () => {
     const discOffset = { x: 1.2, y: -1.2 };
     const plans = (playThrows || []).map((t) => {
       const thrower = playPlayers.find((p) => p.id === t.throwerId);
-      const receiver = playPlayers.find((p) => p.id === t.receiverId);
-      if (!thrower || !receiver) return null;
+      if (!thrower) return null;
       const throwerAtRelease = calculatePositionAtTime(thrower, t.releaseTime);
       const start = { x: throwerAtRelease.x + discOffset.x, y: throwerAtRelease.y + discOffset.y };
-      const receiverAtRelease = calculatePositionAtTime(receiver, t.releaseTime);
+      const throwMode = t.mode === 'space' ? 'space' : 'receiver';
+      const receiver = t.receiverId ? playPlayers.find((p) => p.id === t.receiverId) : null;
+      const targetAtRelease = throwMode === 'space'
+        ? (t.targetPoint ? { x: t.targetPoint.x, y: t.targetPoint.y } : null)
+        : (receiver ? calculatePositionAtTime(receiver, t.releaseTime) : null);
+      if (!targetAtRelease) return null;
       const speed = getThrowSpeed(t.power);
-      const dx = receiverAtRelease.x - start.x;
-      const dy = receiverAtRelease.y - start.y;
+      const dx = targetAtRelease.x - start.x;
+      const dy = targetAtRelease.y - start.y;
       const dist = Math.hypot(dx, dy);
       const minTravel = 0.5;
       const dirX = dist > 0 ? dx / dist : 0;
       const dirY = dist > 0 ? dy / dist : 1;
       const travelDist = Math.max(minTravel, dist);
       const duration = Math.max(0.2, travelDist / speed);
-      const end = dist < minTravel
-        ? { x: start.x + dirX * minTravel, y: start.y + dirY * minTravel }
-        : calculatePositionAtTime(receiver, t.releaseTime + duration);
+      const end = throwMode === 'space'
+        ? { x: targetAtRelease.x, y: targetAtRelease.y }
+        : (dist < minTravel
+          ? { x: start.x + dirX * minTravel, y: start.y + dirY * minTravel }
+          : calculatePositionAtTime(receiver as Player, t.releaseTime + duration));
       return {
         ...t,
+        mode: throwMode,
         start,
         end,
         duration,
-        endTime: t.releaseTime + duration
+        endTime: t.releaseTime + duration,
+        catchPlayerId: throwMode === 'receiver' ? (t.receiverId ?? null) : null
       };
     }).filter((plan): plan is NonNullable<typeof plan> => Boolean(plan));
     return plans.sort((a, b) => a.releaseTime - b.releaseTime);
@@ -489,8 +502,8 @@ const App: React.FC = () => {
     const throwPlansForPlay = computeThrowPlansForPlay(playPlayers, playThrows);
     let holderId = initialHolderId;
     for (const plan of throwPlansForPlay) {
-      if (time >= plan.endTime) {
-        holderId = plan.receiverId;
+      if (time >= plan.endTime && plan.catchPlayerId) {
+        holderId = plan.catchPlayerId;
       }
     }
     return holderId;
@@ -595,7 +608,7 @@ const App: React.FC = () => {
     return throwPlans.map((plan) => ({
       id: plan.id,
       catchTime: plan.endTime,
-      catchPlayerId: plan.receiverId
+      catchPlayerId: plan.catchPlayerId
     }));
   }, [throwPlans]);
 
@@ -897,7 +910,7 @@ const App: React.FC = () => {
   };
 
   const handleSelectPlayer = (id: string) => {
-    if (isSelectingReceiver && throwDraft) {
+    if (isSelectingReceiver && throwDraft && throwDraft.mode === 'receiver') {
       const receiver = players.find((p) => p.id === id);
       if (receiver && receiver.team === 'offense' && receiver.id !== throwDraft.throwerId) {
         setThrowDraft({ ...throwDraft, receiverId: receiver.id });
@@ -909,32 +922,41 @@ const App: React.FC = () => {
     setSelectedPlayerId(id);
   };
 
-  const openThrowControls = (throwerId: string, existingThrow?: { id: string; receiverId: string; releaseTime: number; angle: number; power: 'soft' | 'medium' | 'hard' }) => {
+  const openThrowControls = (throwerId: string, existingThrow?: Play['throws'][number]) => {
+    const draftMode: 'receiver' | 'space' = existingThrow?.mode === 'space' ? 'space' : 'receiver';
     setThrowDraft({
       throwerId,
+      mode: draftMode,
       receiverId: existingThrow?.receiverId ?? null,
+      targetPoint: existingThrow?.targetPoint ? { ...existingThrow.targetPoint } : null,
       releaseTime: existingThrow?.releaseTime ?? 0,
       angle: existingThrow?.angle ?? 0,
       power: existingThrow?.power ?? 'medium'
     });
     setEditingThrowId(existingThrow?.id ?? null);
-    setIsSelectingReceiver(true);
+    setIsSelectingReceiver(draftMode === 'receiver');
+    setIsSelectingThrowTarget(draftMode === 'space');
     setShowThrowControls(true);
   };
 
   const closeThrowControls = () => {
     setShowThrowControls(false);
     setIsSelectingReceiver(false);
+    setIsSelectingThrowTarget(false);
     setThrowDraft(null);
     setEditingThrowId(null);
   };
 
   const confirmThrow = () => {
-    if (!throwDraft || !throwDraft.receiverId) return;
+    if (!throwDraft) return;
+    if (throwDraft.mode === 'receiver' && !throwDraft.receiverId) return;
+    if (throwDraft.mode === 'space' && !throwDraft.targetPoint) return;
     const newThrow = {
       id: editingThrowId ?? generateId(),
       throwerId: throwDraft.throwerId,
-      receiverId: throwDraft.receiverId,
+      mode: throwDraft.mode,
+      receiverId: throwDraft.mode === 'receiver' ? throwDraft.receiverId ?? undefined : undefined,
+      targetPoint: throwDraft.mode === 'space' ? throwDraft.targetPoint ?? undefined : undefined,
       releaseTime: Math.max(0, Math.min(maxPlayDuration, throwDraft.releaseTime)),
       angle: throwDraft.angle,
       power: throwDraft.power
@@ -947,6 +969,7 @@ const App: React.FC = () => {
       return [...base, newThrow].sort((a, b) => a.releaseTime - b.releaseTime);
     });
     setIsSelectingReceiver(false);
+    setIsSelectingThrowTarget(false);
     setShowThrowControls(false);
     setThrowDraft(null);
     setEditingThrowId(null);
@@ -1007,6 +1030,11 @@ const App: React.FC = () => {
 
   const handleFieldClick = (x: number, y: number) => {
     if (isAnimationActive) return;
+    if (throwDraft && isSelectingThrowTarget && throwDraft.mode === 'space') {
+      setThrowDraft({ ...throwDraft, targetPoint: { x, y } });
+      setIsSelectingThrowTarget(false);
+      return;
+    }
     const selected = selectedPlayerId ? players.find(p => p.id === selectedPlayerId) : null;
     if (
       selected?.team === 'offense' &&
@@ -1021,7 +1049,8 @@ const App: React.FC = () => {
   // PERSISTENCE
   const savePlay = (overrideName?: string) => {
     const finalName = (overrideName ?? playName).trim();
-    if (finalName.toLowerCase() === 'new play') {
+    const normalizedName = finalName.toLowerCase();
+    if (normalizedName === 'new isolated play' || normalizedName === 'new play') {
       setTempSavePlayName('');
       setShowSavePlayModal(true);
       return;
@@ -1115,6 +1144,21 @@ const App: React.FC = () => {
       startFromPlayId: editingPlayId,
       startLocked: true
     };
+    const currentStep = (() => {
+      let depth = 1;
+      let cursor = editingPlayId;
+      const seen = new Set<string>();
+      while (cursor) {
+        if (seen.has(cursor)) break;
+        seen.add(cursor);
+        const current = savedPlays.find((p) => p.id === cursor);
+        const parentId = current?.startFromPlayId;
+        if (!parentId) break;
+        depth += 1;
+        cursor = parentId;
+      }
+      return depth;
+    })();
     setSavedPlays((prev) => [nextPlay, ...prev]);
     setPlayers(nextPlayers);
     setThrows([]);
@@ -1132,8 +1176,63 @@ const App: React.FC = () => {
     setSelectedPlayerId(null);
     setMode(InteractionMode.SELECT);
     stopAnimation();
+    setSequenceToast(`Step ${currentStep + 1} created and linked. Draw routes, then save.`);
+    window.setTimeout(() => setSequenceToast(null), 2600);
     if (isFirestoreEnabled()) {
       savePlayToFirestore(nextPlay).catch((error) => console.error('Failed to save play to Firestore', error));
+    }
+  };
+
+  const buildPreviousPlayInSequence = () => {
+    if (!editingPlayId) return;
+    const currentPlay = savedPlays.find((p) => p.id === editingPlayId);
+    if (!currentPlay) return;
+    const currentUser = getCurrentUser();
+    const previousPlay: Play = {
+      ...currentPlay,
+      id: generateId(),
+      name: `${currentPlay.name} - Previous`,
+      description: '',
+      throws: [],
+      sourcePlayId: undefined,
+      startFromPlayId: currentPlay.startFromPlayId,
+      startLocked: currentPlay.startLocked
+    };
+    const updatedCurrent: Play = {
+      ...currentPlay,
+      startFromPlayId: previousPlay.id,
+      startLocked: true,
+      lastEditedBy: currentUser?.uid
+    };
+
+    setSavedPlays((prev) => prev.map((p) => (p.id === currentPlay.id ? updatedCurrent : p)).concat(previousPlay));
+    setStartFromPlayId(previousPlay.id);
+    setStartLocked(true);
+    setSequenceToast('Previous step created and linked.');
+    window.setTimeout(() => setSequenceToast(null), 2200);
+
+    if (isFirestoreEnabled()) {
+      savePlayToFirestore(previousPlay).catch((error) => console.error('Failed to save previous play to Firestore', error));
+      savePlayToFirestore(updatedCurrent).catch((error) => console.error('Failed to relink current play to previous step', error));
+    }
+  };
+
+  const unlinkPlayFromSequence = () => {
+    if (!editingPlayId) return;
+    const currentPlay = savedPlays.find((p) => p.id === editingPlayId);
+    if (!currentPlay) return;
+    const updated: Play = {
+      ...currentPlay,
+      startFromPlayId: undefined,
+      startLocked: false
+    };
+    setSavedPlays((prev) => prev.map((p) => (p.id === editingPlayId ? updated : p)));
+    setStartFromPlayId(null);
+    setStartLocked(false);
+    setSequenceToast('Play unlinked from sequence.');
+    window.setTimeout(() => setSequenceToast(null), 2200);
+    if (isFirestoreEnabled()) {
+      savePlayToFirestore(updated).catch((error) => console.error('Failed to unlink play from sequence', error));
     }
   };
 
@@ -1148,26 +1247,38 @@ const App: React.FC = () => {
   }, [savedPlays, getSequenceAnchorPositionsByLabel, alignPlayersToEndState]);
 
   const getSequenceRunIds = useCallback((startId: string) => {
-    let rootId = startId;
-    const seenParents = new Set<string>([rootId]);
+    const byId = new Map(savedPlays.map((play) => [play.id, play]));
+    const childMap = new Map<string, Play[]>();
+    savedPlays.forEach((play) => {
+      if (!play.startFromPlayId) return;
+      const siblings = childMap.get(play.startFromPlayId) || [];
+      siblings.push(play);
+      childMap.set(play.startFromPlayId, siblings);
+    });
+
+    // Build the exact ancestor chain for the selected play, from root -> current.
+    const ancestorChain: string[] = [];
+    const seenAncestors = new Set<string>();
+    let cursor: string | null = startId;
+    while (cursor && !seenAncestors.has(cursor)) {
+      seenAncestors.add(cursor);
+      ancestorChain.push(cursor);
+      cursor = byId.get(cursor)?.startFromPlayId || null;
+    }
+    const ids = ancestorChain.reverse();
+    const seen = new Set(ids);
+
+    // Continue from the selected play to its descendants.
+    let descendantCursor = startId;
     while (true) {
-      const current = savedPlays.find((play) => play.id === rootId);
-      const parentId = current?.startFromPlayId;
-      if (!parentId || seenParents.has(parentId)) break;
-      rootId = parentId;
-      seenParents.add(rootId);
+      const children = childMap.get(descendantCursor) || [];
+      const nextChild = children.find((child) => !seen.has(child.id));
+      if (!nextChild) break;
+      ids.push(nextChild.id);
+      seen.add(nextChild.id);
+      descendantCursor = nextChild.id;
     }
 
-    const ids = [rootId];
-    const seen = new Set(ids);
-    let cursor = rootId;
-    while (true) {
-      const child = savedPlays.find((play) => play.startFromPlayId === cursor);
-      if (!child || seen.has(child.id)) break;
-      ids.push(child.id);
-      seen.add(child.id);
-      cursor = child.id;
-    }
     return ids;
   }, [savedPlays]);
 
@@ -1323,11 +1434,87 @@ const App: React.FC = () => {
     });
   }, [players, playName, force, playDescription, savedPlays, throws]);
 
+  const hasUnsavedBuilderChanges = useMemo(() => {
+    const current = normalizePlay({
+      name: playName,
+      force,
+      description: playDescription,
+      players,
+      throws: throws || []
+    });
+    if (!editingPlayId) {
+      const emptyDraft = normalizePlay({
+        name: 'New Isolated Play',
+        force: 'home',
+        description: '',
+        players: [],
+        throws: []
+      });
+      return JSON.stringify(current) !== JSON.stringify(emptyDraft);
+    }
+    const savedVersion = savedPlays.find((play) => play.id === editingPlayId);
+    if (!savedVersion) return true;
+    const saved = normalizePlay({
+      name: savedVersion.name,
+      force: savedVersion.force,
+      description: savedVersion.description || '',
+      players: savedVersion.players,
+      throws: savedVersion.throws || []
+    });
+    return JSON.stringify(current) !== JSON.stringify(saved);
+  }, [editingPlayId, force, playDescription, playName, players, savedPlays, throws]);
+
+  const confirmLeaveBuilder = useCallback(() => {
+    if (!hasUnsavedBuilderChanges) return true;
+    return window.confirm('You have unsaved changes to this play. Leave builder without saving?');
+  }, [hasUnsavedBuilderChanges]);
+
+  const navigateToPlaybookSafely = useCallback((afterNavigate?: () => void) => {
+    if (!confirmLeaveBuilder()) return;
+    if (typeof afterNavigate === 'function') {
+      afterNavigate();
+      return;
+    }
+    window.history.pushState({}, '', '/playbook');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  }, [confirmLeaveBuilder]);
+
   const playSaveReason = !players.some(p => p.team === 'offense')
     ? 'Add at least one offensive player before saving.'
     : !hasUnsavedPlay
       ? 'No changes from an existing saved play.'
       : '';
+
+  useEffect(() => {
+    if (!hasUnsavedBuilderChanges) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [hasUnsavedBuilderChanges]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (suppressUnsavedPopGuardRef.current) {
+        suppressUnsavedPopGuardRef.current = false;
+        return;
+      }
+      if (!hasUnsavedBuilderChanges) return;
+      if (window.location.pathname.startsWith('/builder')) return;
+      if (window.confirm('You have unsaved changes to this play. Leave builder without saving?')) return;
+      suppressUnsavedPopGuardRef.current = true;
+      window.history.pushState({}, '', '/builder');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [hasUnsavedBuilderChanges]);
 
   const applyFormationNearOwnEndzone = (formation: 'vertical' | 'side' | 'ho') => {
     if (isAnimationActive) return;
@@ -1382,6 +1569,10 @@ const App: React.FC = () => {
 
   const canBuildNextPlay = Boolean(editingPlayId);
   const buildNextPlayReason = editingPlayId ? '' : 'Save this play before starting a sequence.';
+  const canBuildPreviousPlay = Boolean(editingPlayId);
+  const buildPreviousPlayReason = editingPlayId ? '' : 'Save this play before creating a previous step.';
+  const canUnlinkSequence = Boolean(editingPlayId && startFromPlayId);
+  const unlinkSequenceReason = canUnlinkSequence ? '' : 'This play is not currently linked to a previous step.';
   const currentSequenceRunIds = editingPlayId ? getSequenceRunIds(editingPlayId) : [];
   const canRunSequence = currentSequenceRunIds.length > 1;
   const runSequenceReason = !editingPlayId
@@ -1389,6 +1580,25 @@ const App: React.FC = () => {
     : currentSequenceRunIds.length <= 1
       ? 'No linked next play found for this sequence.'
       : '';
+  const sequenceBreadcrumb = useMemo(() => {
+    if (!editingPlayId) return '';
+    const path: Play[] = [];
+    const seen = new Set<string>();
+    let cursor = editingPlayId;
+    while (cursor) {
+      if (seen.has(cursor)) break;
+      seen.add(cursor);
+      const play = savedPlays.find((p) => p.id === cursor);
+      if (!play) break;
+      path.push(play);
+      cursor = play.startFromPlayId || '';
+    }
+    const ordered = [...path].reverse();
+    if (ordered.length <= 1) return '';
+    const root = ordered[0];
+    const current = ordered[ordered.length - 1];
+    return `Sequence: ${root.name} > ${current.name}`;
+  }, [editingPlayId, savedPlays]);
 
   return (
     <div className="flex flex-col h-screen bg-slate-950 text-slate-100 font-sans overflow-hidden">
@@ -1397,7 +1607,7 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/50">
-              <h2 className="text-lg font-bold flex items-center gap-2"><Plus size={20} className="text-indigo-400" /> Start New Play</h2>
+              <h2 className="text-lg font-bold flex items-center gap-2"><Plus size={20} className="text-indigo-400" /> Start New Isolated Play</h2>
               <button onClick={() => { setShowNewPlayModal(false); setNewPlayConceptName(null); }} className="text-slate-500 hover:text-white transition-colors"><X size={20} /></button>
             </div>
             <div className="p-6 space-y-4">
@@ -1413,7 +1623,7 @@ const App: React.FC = () => {
                 const conceptDraft = newPlayConceptName?.trim() || '';
                 setPlayers([]);
                 setThrows([]);
-                setPlayName(tempPlayName || conceptDraft || 'New Play');
+                setPlayName(tempPlayName || conceptDraft || 'New Isolated Play');
                 setEditingPlayId(null);
                 setPlayDescription('');
                 setPlayOwnerId(currentUser?.uid || null);
@@ -1557,14 +1767,13 @@ const App: React.FC = () => {
       )}
 
       <HeaderBar
-        onBackToPlaybook={() => {
-          window.history.pushState({}, '', '/playbook');
-          window.dispatchEvent(new PopStateEvent('popstate'));
-        }}
+        onBackToPlaybook={() => navigateToPlaybookSafely()}
         onManageTeams={() => {
-          setPendingManageTeams();
-          window.history.pushState({}, '', '/playbook');
-          window.dispatchEvent(new PopStateEvent('popstate'));
+          navigateToPlaybookSafely(() => {
+            setPendingManageTeams();
+            window.history.pushState({}, '', '/playbook');
+            window.dispatchEvent(new PopStateEvent('popstate'));
+          });
         }}
         onManageAccount={() => {
           setShowAccountModal(true);
@@ -1579,8 +1788,14 @@ const App: React.FC = () => {
           setShowAuthModal(true);
         }}
         sublabel="Builder"
+        sequenceLabel={sequenceBreadcrumb}
         user={authUser}
       />
+      {sequenceToast && (
+        <div className="absolute top-20 right-6 z-50 rounded-xl border border-emerald-500/40 bg-emerald-500/15 px-4 py-2 text-xs font-bold tracking-wide text-emerald-200 shadow-xl">
+          {sequenceToast}
+        </div>
+      )}
 
       <div className="flex flex-1 overflow-hidden relative">
         
@@ -1606,6 +1821,12 @@ const App: React.FC = () => {
           onBuildNextPlay={buildNextPlayInSequence}
           canBuildNextPlay={canBuildNextPlay}
           buildNextPlayReason={buildNextPlayReason}
+          onBuildPreviousPlay={buildPreviousPlayInSequence}
+          canBuildPreviousPlay={canBuildPreviousPlay}
+          buildPreviousPlayReason={buildPreviousPlayReason}
+          onUnlinkSequence={unlinkPlayFromSequence}
+          canUnlinkSequence={canUnlinkSequence}
+          unlinkSequenceReason={unlinkSequenceReason}
           maxPlayersPerTeam={MAX_PLAYERS_PER_TEAM}
           usedOffenseLabels={players.filter(p => p.team === 'offense').map(p => parseInt(p.label.replace('O', ''), 10)).filter(n => !Number.isNaN(n))}
           usedDefenseLabels={players.filter(p => p.team === 'defense').map(p => parseInt(p.label.replace('D', ''), 10)).filter(n => !Number.isNaN(n))}
@@ -1636,7 +1857,9 @@ const App: React.FC = () => {
               draggingToken={draggingToken}
               discFlight={discState.flight}
               discHolderId={discState.holderId}
-              highlightPlayerId={throwDraft?.receiverId ?? null}
+              highlightPlayerId={throwDraft?.mode === 'receiver' ? throwDraft?.receiverId ?? null : null}
+              throwTargetPoint={throwDraft?.mode === 'space' ? throwDraft.targetPoint ?? null : null}
+              isSelectingThrowTarget={isSelectingThrowTarget}
               discPath={discState.path}
               onDebugEvent={() => {}}
             />
@@ -1654,6 +1877,7 @@ const App: React.FC = () => {
           throwControls={{
             isOpen: showThrowControls,
             isSelectingReceiver,
+            isSelectingThrowTarget,
             throwDraft,
             maxReleaseTime: maxPlayDuration,
             isEditing: Boolean(editingThrowId),
@@ -1671,10 +1895,31 @@ const App: React.FC = () => {
                 openThrowControls(existing.throwerId, existing);
               }
             },
-            onSelectReceiver: () => setIsSelectingReceiver(true),
+            onSelectReceiver: () => {
+              if (!throwDraft) return;
+              setThrowDraft({ ...throwDraft, mode: 'receiver' });
+              setIsSelectingReceiver(true);
+              setIsSelectingThrowTarget(false);
+            },
+            onSelectTargetPoint: () => {
+              if (!throwDraft) return;
+              setThrowDraft({ ...throwDraft, mode: 'space' });
+              setIsSelectingThrowTarget(true);
+              setIsSelectingReceiver(false);
+            },
             onClearReceiver: () => {
               if (!throwDraft) return;
-              setThrowDraft({ ...throwDraft, receiverId: null });
+              setThrowDraft({ ...throwDraft, receiverId: null, mode: 'receiver' });
+            },
+            onClearTargetPoint: () => {
+              if (!throwDraft) return;
+              setThrowDraft({ ...throwDraft, targetPoint: null, mode: 'space' });
+            },
+            onModeChange: (modeValue: 'receiver' | 'space') => {
+              if (!throwDraft) return;
+              setThrowDraft({ ...throwDraft, mode: modeValue });
+              setIsSelectingReceiver(modeValue === 'receiver');
+              setIsSelectingThrowTarget(modeValue === 'space');
             },
             onReleaseTimeChange: (value: number) => {
               if (!throwDraft) return;

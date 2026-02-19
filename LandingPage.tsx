@@ -45,7 +45,19 @@ const LandingPage: React.FC<LandingPageProps> = ({ user, redirectPath }) => {
                 </div>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-[10px] uppercase tracking-[0.35em] text-emerald-300/80">Sign in required</span>
+                <a
+                  href="https://github.com/klyprsports/ultiplan"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.35em] text-emerald-300/80 hover:text-emerald-200 transition-colors"
+                >
+                  <img
+                    src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
+                    alt="GitHub"
+                    className="h-5 w-5 rounded-full bg-slate-700"
+                  />
+                  Open Source on GitHub
+                </a>
                 {isSignedIn ? (
                   <button
                     type="button"
@@ -80,7 +92,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ user, redirectPath }) => {
                   Design, animate, and share elite ultimate frisbee plays.
                 </h1>
                 <p className="mt-5 text-base sm:text-lg text-slate-300 max-w-xl">
-                  Ultiplan is a free, fast playbook for mapping offensive sets, drawing cuts, and visualizing timing in seconds.
+                  Ultiplan is a free, open-source playbook for mapping offensive sets, drawing cuts, and visualizing timing in seconds.
                 </p>
                 <div className="mt-8 flex flex-wrap items-center gap-4">
                 {isSignedIn ? (
@@ -100,7 +112,19 @@ const LandingPage: React.FC<LandingPageProps> = ({ user, redirectPath }) => {
                       Sign in to Start
                     </button>
                   )}
-                  <div className="text-xs text-slate-400 uppercase tracking-[0.35em]">Free to use • Sign in required</div>
+                  <a
+                    href="https://github.com/klyprsports/ultiplan"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs text-slate-400 uppercase tracking-[0.35em] hover:text-emerald-200 transition-colors"
+                  >
+                    <img
+                      src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
+                      alt="GitHub"
+                      className="h-5 w-5 rounded-full bg-slate-700"
+                    />
+                    Open Source • View on GitHub
+                  </a>
                 </div>
                 {isSignedIn && (
                   <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-400">

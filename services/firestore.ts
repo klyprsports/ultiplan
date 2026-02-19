@@ -102,7 +102,9 @@ const serializePlay = (play: Play, uid: string) => {
     throws: (play.throws || []).map((t) => ({
       id: t.id,
       throwerId: t.throwerId,
-      receiverId: t.receiverId,
+      receiverId: t.receiverId || null,
+      mode: t.mode === 'space' ? 'space' : 'receiver',
+      targetPoint: t.targetPoint ? { x: t.targetPoint.x, y: t.targetPoint.y } : null,
       releaseTime: t.releaseTime,
       angle: t.angle,
       power: t.power
@@ -132,7 +134,9 @@ const hydratePlay = (data: Omit<Play, 'id'>, id: string): Play => ({
   throws: (data.throws || []).map((t) => ({
     id: t.id,
     throwerId: t.throwerId,
-    receiverId: t.receiverId,
+    receiverId: t.receiverId || undefined,
+    mode: t.mode === 'space' ? 'space' : 'receiver',
+    targetPoint: t.targetPoint ? { x: t.targetPoint.x, y: t.targetPoint.y } : undefined,
     releaseTime: t.releaseTime,
     angle: t.angle,
     power: t.power

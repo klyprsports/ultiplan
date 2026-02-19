@@ -21,6 +21,8 @@ interface FieldProps {
   discFlight?: { x: number; y: number; rotation: number } | null;
   discHolderId?: string | null;
   highlightPlayerId?: string | null;
+  throwTargetPoint?: Point | null;
+  isSelectingThrowTarget?: boolean;
   discPath?: Point[] | null;
 }
 
@@ -50,6 +52,8 @@ const Field: React.FC<FieldProps> = ({
   discFlight,
   discHolderId,
   highlightPlayerId,
+  throwTargetPoint,
+  isSelectingThrowTarget = false,
   discPath
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -683,6 +687,26 @@ const Field: React.FC<FieldProps> = ({
                 strokeDasharray="6 6"
                 opacity="0.8"
               />
+            )}
+            {throwTargetPoint && (
+              <g transform={`translate(${throwTargetPoint.x * SCALE}, ${throwTargetPoint.y * SCALE})`}>
+                <circle r={0.85 * SCALE} fill="none" stroke="#facc15" strokeWidth="2" strokeDasharray="4 2" />
+                <line x1={-0.5 * SCALE} y1="0" x2={0.5 * SCALE} y2="0" stroke="#facc15" strokeWidth="2" />
+                <line x1="0" y1={-0.5 * SCALE} x2="0" y2={0.5 * SCALE} stroke="#facc15" strokeWidth="2" />
+              </g>
+            )}
+            {isSelectingThrowTarget && !throwTargetPoint && (
+              <text
+                x={w / 2}
+                y={24}
+                textAnchor="middle"
+                fill="#facc15"
+                fontSize="12"
+                fontWeight="700"
+                style={{ letterSpacing: '0.08em' }}
+              >
+                CLICK FIELD TO SET THROW TARGET
+              </text>
             )}
           </svg>
         </div>

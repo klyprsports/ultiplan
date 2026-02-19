@@ -127,7 +127,16 @@ export const normalizePlay = (play: {
   players: Player[];
   visibility?: 'private' | 'team' | 'public';
   sharedTeamIds?: string[];
-  throws?: { id: string; throwerId: string; receiverId: string; releaseTime: number; angle: number; power: string }[];
+  throws?: {
+    id: string;
+    throwerId: string;
+    receiverId?: string;
+    mode?: 'receiver' | 'space';
+    targetPoint?: { x: number; y: number };
+    releaseTime: number;
+    angle: number;
+    power: string;
+  }[];
 }) => ({
   name: play.name.trim(),
   conceptId: play.conceptId?.trim() || '',
@@ -141,7 +150,9 @@ export const normalizePlay = (play: {
     .map((t) => ({
       id: t.id,
       throwerId: t.throwerId,
-      receiverId: t.receiverId,
+      receiverId: t.receiverId ?? '',
+      mode: t.mode === 'space' ? 'space' : 'receiver',
+      targetPoint: t.targetPoint ? { x: t.targetPoint.x, y: t.targetPoint.y } : null,
       releaseTime: t.releaseTime,
       angle: t.angle,
       power: t.power

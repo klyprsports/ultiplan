@@ -25,11 +25,14 @@ export interface Player {
 }
 
 export type ThrowPower = 'soft' | 'medium' | 'hard';
+export type ThrowMode = 'receiver' | 'space';
 
 export interface ThrowEvent {
   id: string;
   throwerId: string;
-  receiverId: string;
+  receiverId?: string;
+  mode?: ThrowMode;
+  targetPoint?: Point;
   releaseTime: number;
   angle: number; // -1 (IO) to 1 (OI)
   power: ThrowPower;
