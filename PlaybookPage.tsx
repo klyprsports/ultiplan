@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Share2, Users, Plus, ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
+import { Share2, Users, Plus, ChevronDown, ChevronRight, GripVertical, Menu } from 'lucide-react';
 import { Play, TeamInfo } from './types';
 import {
   loadPlaysFromStorage,
@@ -80,8 +80,12 @@ const PlaybookPage: React.FC = () => {
   const [moveConceptChoice, setMoveConceptChoice] = useState<string>('__independent__');
   const [moveNewConceptName, setMoveNewConceptName] = useState('');
   const [expandedConcepts, setExpandedConcepts] = useState<Record<string, boolean>>({});
+  const [conceptNameDrafts, setConceptNameDrafts] = useState<Record<string, string>>({});
+  const conceptNameSaveTimersRef = useRef<Record<string, number>>({});
   const [sequenceNameDrafts, setSequenceNameDrafts] = useState<Record<string, string>>({});
   const sequenceNameSaveTimersRef = useRef<Record<string, number>>({});
+  const [deletePlayTarget, setDeletePlayTarget] = useState<Play | null>(null);
+  const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
   const [draggingSequence, setDraggingSequence] = useState<{ conceptId: string; sequenceIndex: number } | null>(null);
   const [dragOverSequenceKey, setDragOverSequenceKey] = useState<string | null>(null);
 
@@ -211,12 +215,6 @@ const PlaybookPage: React.FC = () => {
     const play = savedPlays.find((entry) => entry.id === playId);
     if (!play) return;
     const idsToDelete = getDescendantIds(playId, savedPlays);
-    const confirmed = window.confirm(
-      idsToDelete.length > 1
-        ? `Delete "${play.name}" and ${idsToDelete.length - 1} downstream play(s)?`
-        : `Delete "${play.name}"?`
-    );
-    if (!confirmed) return;
     const deleteSet = new Set(idsToDelete);
     const nextPlays = savedPlays.filter((entry) => !deleteSet.has(entry.id));
     await applyPlaybookMutation(nextPlays, [], idsToDelete);
@@ -225,8 +223,6 @@ const PlaybookPage: React.FC = () => {
   const deletePlayStepOnly = async (playId: string) => {
     const play = savedPlays.find((entry) => entry.id === playId);
     if (!play) return;
-    const confirmed = window.confirm(`Delete step "${play.name}" and relink any following steps?`);
-    if (!confirmed) return;
     const children = savedPlays.filter((entry) => entry.startFromPlayId === playId);
     const relinked = children.map((child) => ({
       ...child,
@@ -362,6 +358,19 @@ const PlaybookPage: React.FC = () => {
       conceptId,
       conceptName,
       startFromPlayId
+    });
+    navigate('/builder');
+  };
+
+  const createNewSequenceFromPlay = (play: Play, conceptId?: string, conceptName?: string) => {
+    clearPendingConceptDraft();
+    const resolvedConceptId = conceptId || play.conceptId;
+    const resolvedConceptName = conceptName || play.conceptName;
+    setPendingSelection({
+      type: 'new-play',
+      conceptId: resolvedConceptId,
+      conceptName: resolvedConceptName,
+      startFromPlayId: play.id
     });
     navigate('/builder');
   };
@@ -556,6 +565,16 @@ const PlaybookPage: React.FC = () => {
       });
       return next;
     });
+    setConceptNameDrafts((prev) => {
+      const next = { ...prev };
+      playConcepts.forEach((concept) => {
+        if (concept.isIndependent) return;
+        if (!(concept.id in next)) {
+          next[concept.id] = concept.name;
+        }
+      });
+      return next;
+    });
     setSequenceNameDrafts((prev) => {
       const next = { ...prev };
       playConcepts.forEach((concept) => {
@@ -572,9 +591,20 @@ const PlaybookPage: React.FC = () => {
 
   useEffect(() => {
     return () => {
+      Object.values(conceptNameSaveTimersRef.current).forEach((timerId) => {
+        window.clearTimeout(timerId);
+      });
       Object.values(sequenceNameSaveTimersRef.current).forEach((timerId) => {
         window.clearTimeout(timerId);
       });
+    };
+  }, []);
+
+  useEffect(() => {
+    const closeMenus = () => setOpenMenuKey(null);
+    document.addEventListener('click', closeMenus);
+    return () => {
+      document.removeEventListener('click', closeMenus);
     };
   }, []);
 
@@ -586,6 +616,41 @@ const PlaybookPage: React.FC = () => {
     const named = [...sequence].reverse().find((play) => (play.sequenceName || '').trim().length > 0);
     return named?.sequenceName?.trim() || `Sequence ${sequenceIndex + 1}`;
   }, []);
+
+  const getConceptDisplayName = useCallback((conceptId: string, fallbackName: string) => {
+    const draft = conceptNameDrafts[conceptId];
+    return (draft ?? fallbackName).trim() || 'Untitled Concept';
+  }, [conceptNameDrafts]);
+
+  const persistConceptName = async (conceptId: string, nextName: string) => {
+    const trimmed = nextName.trim();
+    const updatedPlays = savedPlays.map((play) => (
+      play.conceptId === conceptId
+        ? { ...play, conceptName: trimmed || undefined }
+        : play
+    ));
+    const playsToPersist = updatedPlays.filter((play) => play.conceptId === conceptId);
+    setSavedPlays(updatedPlays);
+    if (isFirestoreEnabled()) {
+      await Promise.all(
+        playsToPersist.map((play) => savePlayToFirestore(play).catch((error) => {
+          console.error('Failed to update concept name in Firestore', error);
+        }))
+      );
+    }
+  };
+
+  const updateConceptNameDraft = (conceptId: string, nextName: string) => {
+    setConceptNameDrafts((prev) => ({ ...prev, [conceptId]: nextName }));
+    const existingTimer = conceptNameSaveTimersRef.current[conceptId];
+    if (existingTimer) {
+      window.clearTimeout(existingTimer);
+    }
+    conceptNameSaveTimersRef.current[conceptId] = window.setTimeout(() => {
+      persistConceptName(conceptId, nextName);
+      delete conceptNameSaveTimersRef.current[conceptId];
+    }, 450);
+  };
 
   const getSequenceKey = (conceptId: string, sequence: Play[], sequenceIndex: number) =>
     `${conceptId}::${sequence[sequence.length - 1]?.id || sequenceIndex}`;
@@ -681,7 +746,13 @@ const PlaybookPage: React.FC = () => {
     await reorderSequenceOrder(conceptId, sequenceIndex, targetIndex);
   };
 
-  const renderPlayCard = (play: Play, branchRootId?: string, branchChildId?: string): React.ReactNode => {
+  const renderPlayCard = (
+    play: Play,
+    branchRootId?: string,
+    branchChildId?: string,
+    contextConceptId?: string,
+    contextConceptName?: string
+  ): React.ReactNode => {
     const snapshotWidth = 135;
     const snapshotHeight = 371;
     const fieldWidth = 40;
@@ -840,33 +911,52 @@ const PlaybookPage: React.FC = () => {
         }}
         className="rounded-xl border border-slate-800 bg-slate-900/60 hover:border-emerald-500/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/70 transition-colors cursor-pointer p-3"
       >
-        <div className="mb-3">
+        <div className="mb-3 flex items-start justify-between gap-2">
           <h3 className="text-sm font-bold text-sky-200 truncate" title={play.name}>{play.name}</h3>
-          <div className="mt-1.5 flex items-center gap-2">
+          <div className="relative">
             <button
               type="button"
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                deletePlayStepOnly(play.id);
+                const menuKey = `play:${play.id}`;
+                setOpenMenuKey((prev) => (prev === menuKey ? null : menuKey));
               }}
-              className="rounded border border-slate-700 bg-slate-900/70 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-slate-300 hover:bg-slate-800 hover:text-white"
-              title="Delete this step only and relink following steps"
+              className="rounded border border-slate-700 bg-slate-900/70 p-1 text-slate-300 hover:bg-slate-800 hover:text-white"
+              title="Play actions"
             >
-              Delete Step
+              <Menu size={13} />
             </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                deletePlaySubtree(play.id);
-              }}
-              className="rounded border border-red-900/60 bg-red-950/30 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-red-300 hover:bg-red-900/40 hover:text-red-100"
-              title="Delete this play and downstream plays"
-            >
-              Delete Play
-            </button>
+            {openMenuKey === `play:${play.id}` && (
+              <div
+                className="absolute right-0 top-7 z-30 min-w-[180px] rounded-md border border-slate-700 bg-slate-900 shadow-xl py-1"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenMenuKey(null);
+                    createNewSequenceFromPlay(play, contextConceptId, contextConceptName);
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-[11px] font-semibold text-slate-200 hover:bg-slate-800"
+                >
+                  Start New Sequence From Here
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenMenuKey(null);
+                    setDeletePlayTarget(play);
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-[11px] font-semibold text-red-300 hover:bg-red-950/40"
+                >
+                  Delete Play
+                </button>
+              </div>
+            )}
           </div>
         </div>
         <div className="rounded-lg border border-slate-800 bg-emerald-950/70 overflow-hidden">
@@ -970,27 +1060,31 @@ const PlaybookPage: React.FC = () => {
                 <div className="space-y-2">
                   {playConcepts.map((concept) => {
                     const conceptOpen = expandedConcepts[concept.id] ?? true;
+                    const conceptDisplayName = concept.isIndependent
+                      ? concept.name
+                      : getConceptDisplayName(concept.id, concept.name);
                     return (
                       <div key={`nav-${concept.id}`} className="rounded-lg border border-slate-800 bg-slate-950/40">
-                        <button
-                          type="button"
-                          onClick={() => toggleConcept(concept.id)}
-                          className="w-full flex items-center justify-between px-2.5 py-2 text-left"
-                        >
-                          <span className={`text-[11px] font-bold uppercase tracking-[0.12em] ${concept.isIndependent ? 'text-slate-300' : 'text-emerald-300'}`}>{concept.name}</span>
-                          {conceptOpen ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
-                        </button>
-                        {!concept.isIndependent && (
-                          <div className="px-2.5 pb-1.5">
-                            <button
-                              type="button"
-                              onClick={() => createNewSequenceInConcept(concept.id, concept.name)}
-                              className="w-full rounded-md border border-slate-700 bg-slate-900/70 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
-                            >
-                              New Sequence
-                            </button>
-                          </div>
-                        )}
+                        <div className="w-full flex items-center justify-between gap-2 px-2.5 py-2 text-left">
+                          {concept.isIndependent ? (
+                            <span className="min-w-0 flex-1 text-[11px] font-bold uppercase tracking-[0.12em] text-slate-300 truncate">
+                              {conceptDisplayName}
+                            </span>
+                          ) : (
+                            <input
+                              value={conceptDisplayName}
+                              onChange={(e) => updateConceptNameDraft(concept.id, e.target.value)}
+                              className="min-w-0 flex-1 bg-transparent border border-transparent hover:border-slate-700/70 focus:border-indigo-500/60 rounded px-1 py-0.5 text-[11px] font-bold uppercase tracking-[0.12em] text-emerald-300 focus:outline-none"
+                            />
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => toggleConcept(concept.id)}
+                            className="text-slate-400 hover:text-white transition-colors"
+                          >
+                            {conceptOpen ? <ChevronDown size={14} className="text-slate-400" /> : <ChevronRight size={14} className="text-slate-400" />}
+                          </button>
+                        </div>
                         {conceptOpen && (
                           <div className="pb-2 px-1.5 space-y-1">
                             {concept.sequences.map((sequence, sequenceIndex) => {
@@ -1062,17 +1156,49 @@ const PlaybookPage: React.FC = () => {
                 {playConcepts.map((concept) => (
                   <div key={concept.id} className="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 shadow-lg">
                   <div className="flex items-center justify-between gap-3">
-                    <h2 className={`text-sm font-extrabold uppercase tracking-[0.18em] ${concept.isIndependent ? 'text-slate-300' : 'text-emerald-300'}`}>
-                      {concept.name}
-                    </h2>
+                    {concept.isIndependent ? (
+                      <h2 className="text-sm font-extrabold uppercase tracking-[0.18em] text-slate-300">
+                        {concept.name}
+                      </h2>
+                    ) : (
+                      <input
+                        value={getConceptDisplayName(concept.id, concept.name)}
+                        onChange={(e) => updateConceptNameDraft(concept.id, e.target.value)}
+                        className="min-w-0 flex-1 bg-transparent border border-transparent hover:border-slate-700/70 focus:border-indigo-500/60 rounded px-1 py-0.5 text-sm font-extrabold uppercase tracking-[0.18em] text-emerald-300 focus:outline-none"
+                      />
+                    )}
                     {!concept.isIndependent && (
-                      <button
-                        type="button"
-                        onClick={() => createNewSequenceInConcept(concept.id, concept.name)}
-                        className="px-2.5 py-1 rounded-md border border-slate-700 bg-slate-900/70 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-300 hover:bg-slate-800 hover:text-white transition-colors"
-                      >
-                        New Sequence
-                      </button>
+                      <div className="relative">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const menuKey = `concept:${concept.id}`;
+                            setOpenMenuKey((prev) => (prev === menuKey ? null : menuKey));
+                          }}
+                          className="rounded border border-slate-700 bg-slate-900/70 p-1 text-slate-300 hover:bg-slate-800 hover:text-white"
+                          title="Concept actions"
+                        >
+                          <Menu size={14} />
+                        </button>
+                        {openMenuKey === `concept:${concept.id}` && (
+                          <div
+                            className="absolute right-0 top-7 z-30 min-w-[170px] rounded-md border border-slate-700 bg-slate-900 shadow-xl py-1"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenMenuKey(null);
+                                createNewSequenceInConcept(concept.id, getConceptDisplayName(concept.id, concept.name));
+                              }}
+                              className="w-full text-left px-3 py-1.5 text-[11px] font-semibold text-slate-200 hover:bg-slate-800"
+                            >
+                              New Sequence
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     )}
                   </div>
                     <div className="mt-3 space-y-3">
@@ -1089,14 +1215,37 @@ const PlaybookPage: React.FC = () => {
                               onChange={(e) => updateSequenceNameDraft(concept.id, sequenceIndex, sequence, e.target.value)}
                               className="min-w-0 flex-1 bg-transparent border border-transparent hover:border-slate-700/70 focus:border-indigo-500/60 rounded px-1 py-0.5 text-[10px] uppercase tracking-widest text-slate-300 font-bold focus:outline-none"
                             />
-                            <button
-                              type="button"
-                              onClick={() => deleteSequenceBranch(sequence, concept.sequences)}
-                              className="rounded border border-red-900/60 bg-red-950/30 px-2 py-1 text-[9px] font-bold uppercase tracking-[0.12em] text-red-300 hover:bg-red-900/40 hover:text-red-100"
-                              title="Delete this sequence branch"
-                            >
-                              Delete Sequence
-                            </button>
+                            <div className="relative">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const menuKey = `sequence:${concept.id}:${sequenceIndex}`;
+                                  setOpenMenuKey((prev) => (prev === menuKey ? null : menuKey));
+                                }}
+                                className="rounded border border-slate-700 bg-slate-900/70 p-1 text-slate-300 hover:bg-slate-800 hover:text-white"
+                                title="Sequence actions"
+                              >
+                                <Menu size={13} />
+                              </button>
+                              {openMenuKey === `sequence:${concept.id}:${sequenceIndex}` && (
+                                <div
+                                  className="absolute right-0 top-7 z-30 min-w-[165px] rounded-md border border-slate-700 bg-slate-900 shadow-xl py-1"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenMenuKey(null);
+                                      deleteSequenceBranch(sequence, concept.sequences);
+                                    }}
+                                    className="w-full text-left px-3 py-1.5 text-[11px] font-semibold text-red-300 hover:bg-red-950/40"
+                                  >
+                                    Delete Sequence
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
                             );
                           })()}
@@ -1104,7 +1253,13 @@ const PlaybookPage: React.FC = () => {
                             {sequence.map((play, stepIndex) => (
                               <div key={`${concept.id}-${sequenceIndex}-${play.id}-${stepIndex}`} className="flex items-center gap-2">
                                 <div className="min-w-[170px] max-w-[190px]">
-                                  {renderPlayCard(play, sequence[0]?.id, sequence[1]?.id)}
+                                  {renderPlayCard(
+                                    play,
+                                    sequence[0]?.id,
+                                    sequence[1]?.id,
+                                    concept.id === '__independent__' ? undefined : concept.id,
+                                    concept.id === '__independent__' ? undefined : getConceptDisplayName(concept.id, concept.name)
+                                  )}
                                 </div>
                                 {stepIndex < sequence.length - 1 && (
                                   <div className="text-slate-500 text-[12px] font-bold px-1">→</div>
@@ -1345,6 +1500,53 @@ const PlaybookPage: React.FC = () => {
                     className="flex-1 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-widest bg-emerald-500 text-emerald-950 hover:bg-emerald-400"
                   >
                     Save
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {deletePlayTarget && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/50">
+                <h2 className="text-base font-bold">Delete Play</h2>
+                <button onClick={() => setDeletePlayTarget(null)} className="text-slate-500 hover:text-white transition-colors">X</button>
+              </div>
+              <div className="p-6 space-y-4">
+                <p className="text-sm text-slate-200">
+                  Delete <span className="font-bold">{deletePlayTarget.name}</span>?
+                </p>
+                <p className="text-xs text-slate-400">
+                  Default deletes only this play and keeps following plays by relinking them.
+                </p>
+                <div className="space-y-2">
+                  <button
+                    onClick={() => setDeletePlayTarget(null)}
+                    className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const targetId = deletePlayTarget.id;
+                      setDeletePlayTarget(null);
+                      await deletePlayStepOnly(targetId);
+                    }}
+                    className="w-full py-3 px-4 bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold rounded-xl transition-all"
+                  >
+                    Delete Only This Play
+                  </button>
+                  <button
+                    onClick={async () => {
+                      const targetId = deletePlayTarget.id;
+                      setDeletePlayTarget(null);
+                      await deletePlaySubtree(targetId);
+                    }}
+                    className="w-full py-3 px-4 bg-red-700 hover:bg-red-600 text-white font-bold rounded-xl transition-all"
+                  >
+                    Delete This And Following
                   </button>
                 </div>
               </div>

@@ -87,6 +87,10 @@ const App: React.FC = () => {
   const [sequenceToast, setSequenceToast] = useState<string | null>(null);
   const [preferredSequenceBranchByRoot, setPreferredSequenceBranchByRoot] = useState<Record<string, string>>({});
   const suppressUnsavedPopGuardRef = useRef(false);
+  const latestAnimatedFrameRef = useRef<{ positionsByKey: Record<string, Point>; holderKey: string | null }>({
+    positionsByKey: {},
+    holderKey: null
+  });
 
   const isAnimationActive = animationState !== 'IDLE';
 
@@ -1023,13 +1027,13 @@ const App: React.FC = () => {
       if (discState.turnoverTime && nextTime >= discState.turnoverTime) {
         setAnimationState('IDLE');
         if (animationRef.current) cancelAnimationFrame(animationRef.current);
-        return prev;
+        return discState.turnoverTime;
       }
-      const finalPlaybackTime = maxPlayDuration + 1;
+      const finalPlaybackTime = maxPlayDuration;
       if (maxPlayDuration > 0 && nextTime >= finalPlaybackTime) {
         setAnimationState('IDLE');
         if (animationRef.current) cancelAnimationFrame(animationRef.current);
-        return prev;
+        return finalPlaybackTime;
       }
       return nextTime;
     });
@@ -1183,40 +1187,6 @@ const App: React.FC = () => {
     }
   };
 
-  const buildPreviousPlayInSequence = () => {
-    if (!editingPlayId) return;
-    const currentPlay = savedPlays.find((p) => p.id === editingPlayId);
-    if (!currentPlay) return;
-    const currentUser = getCurrentUser();
-    const previousPlay: Play = {
-      ...currentPlay,
-      id: generateId(),
-      name: `${currentPlay.name} - Previous`,
-      description: '',
-      throws: [],
-      sourcePlayId: undefined,
-      startFromPlayId: currentPlay.startFromPlayId,
-      startLocked: currentPlay.startLocked
-    };
-    const updatedCurrent: Play = {
-      ...currentPlay,
-      startFromPlayId: previousPlay.id,
-      startLocked: true,
-      lastEditedBy: currentUser?.uid
-    };
-
-    setSavedPlays((prev) => prev.map((p) => (p.id === currentPlay.id ? updatedCurrent : p)).concat(previousPlay));
-    setStartFromPlayId(previousPlay.id);
-    setStartLocked(true);
-    setSequenceToast('Previous step created and linked.');
-    window.setTimeout(() => setSequenceToast(null), 2200);
-
-    if (isFirestoreEnabled()) {
-      savePlayToFirestore(previousPlay).catch((error) => console.error('Failed to save previous play to Firestore', error));
-      savePlayToFirestore(updatedCurrent).catch((error) => console.error('Failed to relink current play to previous step', error));
-    }
-  };
-
   const unlinkPlayFromSequence = () => {
     if (!editingPlayId) return;
     const currentPlay = savedPlays.find((p) => p.id === editingPlayId);
@@ -1242,8 +1212,13 @@ const App: React.FC = () => {
     if (!parent) return play;
     const endPositions = getSequenceAnchorPositionsByLabel(parent.players, parent.throws || []);
     const aligned = alignPlayersToEndState(play.players, endPositions);
-    if (!aligned.changed) return play;
-    return { ...play, players: aligned.players };
+    const forceChanged = play.force !== parent.force;
+    if (!aligned.changed && !forceChanged) return play;
+    return {
+      ...play,
+      players: aligned.changed ? aligned.players : play.players,
+      force: parent.force
+    };
   }, [savedPlays, getSequenceAnchorPositionsByLabel, alignPlayersToEndState]);
 
   const getSequenceRunIds = useCallback((startId: string) => {
@@ -1267,22 +1242,32 @@ const App: React.FC = () => {
     }
     const ids = ancestorChain.reverse();
     const seen = new Set(ids);
+    const rootId = ids[0];
 
     // Continue from the selected play to descendants only while the chain is unambiguous.
-    // If a node has multiple children (a branch), stop instead of arbitrarily picking one.
+    // At root branching points, follow preferred branch (or first child) so Run Sequence
+    // still works from step 1.
     let descendantCursor = startId;
     while (true) {
       const children = childMap.get(descendantCursor) || [];
       const availableChildren = children.filter((child) => !seen.has(child.id));
-      if (availableChildren.length !== 1) break;
-      const [nextChild] = availableChildren;
+      let nextChild: Play | undefined;
+      if (availableChildren.length === 1) {
+        [nextChild] = availableChildren;
+      } else if (availableChildren.length > 1 && descendantCursor === rootId) {
+        const preferred = preferredSequenceBranchByRoot[rootId];
+        nextChild = availableChildren.find((child) => child.id === preferred) || availableChildren[0];
+      } else {
+        break;
+      }
+      if (!nextChild) break;
       ids.push(nextChild.id);
       seen.add(nextChild.id);
       descendantCursor = nextChild.id;
     }
 
     return ids;
-  }, [savedPlays]);
+  }, [savedPlays, preferredSequenceBranchByRoot]);
 
   const getAncestorChainToRoot = useCallback((startId: string) => {
     const byId = new Map(savedPlays.map((play) => [play.id, play]));
@@ -1402,7 +1387,25 @@ const App: React.FC = () => {
       return;
     }
 
-    const resolved = resolveSequencePlay(nextPlay);
+    const resolved = (() => {
+      // When advancing to a direct child, anchor to the exact end-state of the
+      // play that just finished, so start/end continuity is frame-stable.
+      if (editingPlayId && nextPlay.startFromPlayId === editingPlayId) {
+        const frame = latestAnimatedFrameRef.current;
+        const hasFrame = Object.keys(frame.positionsByKey).length > 0;
+        const endPositions = hasFrame
+          ? new Map(
+            Object.entries(frame.positionsByKey).map(([key, pos]) => [
+              key,
+              { x: pos.x, y: pos.y, hasDisc: key === frame.holderKey }
+            ])
+          )
+          : getSequenceAnchorPositionsByLabel(players, throws || []);
+        const aligned = alignPlayersToEndState(nextPlay.players, endPositions);
+        return aligned.changed ? { ...nextPlay, players: aligned.players } : nextPlay;
+      }
+      return resolveSequencePlay(nextPlay);
+    })();
     setPendingAutoStartPlayId(nextPlayId);
     setSequenceRunCursor(nextCursor);
     setPlayers(resolved.players);
@@ -1421,7 +1424,19 @@ const App: React.FC = () => {
     setSelectedPlayerId(null);
     setMode(InteractionMode.SELECT);
     setAnimationTime(0);
-  }, [sequenceRunPlayIds, pendingAutoStartPlayId, animationState, sequenceRunCursor, savedPlays, resolveSequencePlay]);
+  }, [
+    sequenceRunPlayIds,
+    pendingAutoStartPlayId,
+    animationState,
+    sequenceRunCursor,
+    savedPlays,
+    resolveSequencePlay,
+    editingPlayId,
+    players,
+    throws,
+    getSequenceAnchorPositionsByLabel,
+    alignPlayersToEndState
+  ]);
 
   useEffect(() => {
     if (!pendingAutoStartPlayId) return;
@@ -1605,8 +1620,6 @@ const App: React.FC = () => {
 
   const canBuildNextPlay = Boolean(editingPlayId);
   const buildNextPlayReason = editingPlayId ? '' : 'Make a change and wait for autosave before starting a sequence.';
-  const canBuildPreviousPlay = Boolean(editingPlayId);
-  const buildPreviousPlayReason = editingPlayId ? '' : 'Make a change and wait for autosave before creating a previous step.';
   const canUnlinkSequence = Boolean(editingPlayId && startFromPlayId);
   const unlinkSequenceReason = canUnlinkSequence ? '' : 'This play is not currently linked to a previous step.';
   const currentSequenceRunIds = editingPlayId ? getSequenceRunIds(editingPlayId) : [];
@@ -1689,6 +1702,13 @@ const App: React.FC = () => {
     loadPlay(targetPlay);
   }, [editingPlayId, savedPlays]);
 
+  const modalConceptName = newPlayConceptName?.trim() || '';
+  const modalIsConceptScoped = Boolean(newPlayConceptId || modalConceptName);
+  const modalIsSequenceSeeded = Boolean(newPlayStartFromPlayId);
+  const newPlayModalTitle = modalIsConceptScoped
+    ? (modalIsSequenceSeeded ? 'Start New Sequence Play' : 'Start New Concept Play')
+    : 'Start New Isolated Play';
+
   return (
     <div className="flex flex-col h-screen bg-slate-950 text-slate-100 font-sans overflow-hidden">
       {/* New Play Modal */}
@@ -1696,10 +1716,20 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-800/50">
-              <h2 className="text-lg font-bold flex items-center gap-2"><Plus size={20} className="text-indigo-400" /> Start New Isolated Play</h2>
+              <h2 className="text-lg font-bold flex items-center gap-2"><Plus size={20} className="text-indigo-400" /> {newPlayModalTitle}</h2>
               <button onClick={() => { setShowNewPlayModal(false); setNewPlayConceptId(null); setNewPlayConceptName(null); setNewPlayStartFromPlayId(null); }} className="text-slate-500 hover:text-white transition-colors"><X size={20} /></button>
             </div>
             <div className="p-6 space-y-4">
+              {modalIsConceptScoped && (
+                <div className="rounded-lg border border-slate-800 bg-slate-950/50 px-3 py-2">
+                  <p className="text-[11px] text-slate-300">
+                    Saving into concept: <span className="font-bold text-emerald-300">{modalConceptName || 'Untitled Concept'}</span>
+                  </p>
+                  {modalIsSequenceSeeded && (
+                    <p className="mt-1 text-[10px] text-slate-400">Initial setup is copied from the selected play.</p>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1.5 ml-1">Play Name</label>
                 <input autoFocus type="text" value={tempPlayName} onChange={(e) => setTempPlayName(e.target.value)} placeholder="e.g. Vert Stack Deep Look" className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/50" />
@@ -1710,30 +1740,23 @@ const App: React.FC = () => {
               <button onClick={() => {
                 const currentUser = getCurrentUser();
                 const conceptDraft = newPlayConceptName?.trim() || '';
-                const parentPlay = newPlayStartFromPlayId
+                const seedPlay = newPlayStartFromPlayId
                   ? savedPlays.find((play) => play.id === newPlayStartFromPlayId)
                   : undefined;
-                const parentEndPositions = parentPlay
-                  ? getSequenceAnchorPositionsByLabel(parentPlay.players, parentPlay.throws || [])
-                  : null;
-                const nextPlayers = parentPlay
-                  ? parentPlay.players.map((player) => {
-                    const key = `${player.team}:${player.label}`;
-                    const target = parentEndPositions?.get(key);
-                    return {
-                      ...player,
-                      x: target?.x ?? player.x,
-                      y: target?.y ?? player.y,
-                      path: [],
-                      pathStartOffset: 0,
-                      hasDisc: target?.hasDisc ?? false,
-                      autoAssigned: false,
-                      coversOffenseId: undefined
-                    };
-                  })
+                const clonedPlayers = seedPlay
+                  ? seedPlay.players.map((player) => ({
+                    ...player,
+                    path: player.path.map((point) => ({ ...point }))
+                  }))
                   : [];
-                setPlayers(nextPlayers);
-                setThrows([]);
+                const clonedThrows = seedPlay
+                  ? (seedPlay.throws || []).map((throwEvent) => ({
+                    ...throwEvent,
+                    targetPoint: throwEvent.targetPoint ? { ...throwEvent.targetPoint } : undefined
+                  }))
+                  : [];
+                setPlayers(clonedPlayers);
+                setThrows(clonedThrows);
                 const trimmedPlayName = tempPlayName.trim();
                 const defaultName = conceptDraft ? 'New Play' : 'New Isolated Play';
                 setPlayName(trimmedPlayName || defaultName);
@@ -1741,11 +1764,14 @@ const App: React.FC = () => {
                 setPlayDescription('');
                 setPlayOwnerId(currentUser?.uid || null);
                 setPlayCreatedBy(currentUser?.uid || null);
-                setPlaySourceId(null);
+                setPlaySourceId(seedPlay?.id || null);
                 setPlayConceptId(newPlayConceptId || (conceptDraft ? generateId() : null));
                 setPlayConceptName(conceptDraft);
-                setStartFromPlayId(parentPlay?.id || null);
-                setStartLocked(Boolean(parentPlay));
+                if (seedPlay) {
+                  setForce(seedPlay.force);
+                }
+                setStartFromPlayId(null);
+                setStartLocked(false);
                 setNewPlayConceptId(null);
                 setNewPlayConceptName(null);
                 setNewPlayStartFromPlayId(null);
@@ -1830,6 +1856,16 @@ const App: React.FC = () => {
         sequencePlays={sequencePlays}
         currentPlayId={editingPlayId}
         onOpenSequencePlay={openSequencePlayFromSidebar}
+        animationState={animationState}
+        animationTime={animationTime}
+        onStartAnimation={startAnimation}
+        onStartSequence={runSequenceFromCurrentPlay}
+        canStartSequence={canRunSequence}
+        startSequenceReason={runSequenceReason}
+        onTogglePause={togglePause}
+        onStopAnimation={stopAnimationManually}
+        onResetAnimation={resetAnimationManually}
+        hasPlayers={players.length > 0}
         user={authUser}
       />
       {sequenceToast && (
@@ -1859,9 +1895,6 @@ const App: React.FC = () => {
           onBuildNextPlay={buildNextPlayInSequence}
           canBuildNextPlay={canBuildNextPlay}
           buildNextPlayReason={buildNextPlayReason}
-          onBuildPreviousPlay={buildPreviousPlayInSequence}
-          canBuildPreviousPlay={canBuildPreviousPlay}
-          buildPreviousPlayReason={buildPreviousPlayReason}
           onUnlinkSequence={unlinkPlayFromSequence}
           canUnlinkSequence={canUnlinkSequence}
           unlinkSequenceReason={unlinkSequenceReason}
@@ -1899,7 +1932,9 @@ const App: React.FC = () => {
               throwTargetPoint={throwDraft?.mode === 'space' ? throwDraft.targetPoint ?? null : null}
               isSelectingThrowTarget={isSelectingThrowTarget}
               discPath={discState.path}
-              onDebugEvent={() => {}}
+              onAnimatedFrame={(positionsByKey, holderKey) => {
+                latestAnimatedFrameRef.current = { positionsByKey, holderKey };
+              }}
             />
           </div>
         </div>
@@ -1980,16 +2015,6 @@ const App: React.FC = () => {
           onUpdateRole={updatePlayerRole}
           onUpdateCutterDefense={updateCutterDefense}
           isPlaying={isAnimationActive} 
-          animationState={animationState}
-          animationTime={animationTime}
-          onStartAnimation={startAnimation}
-          onStartSequence={runSequenceFromCurrentPlay}
-          canStartSequence={canRunSequence}
-          startSequenceReason={runSequenceReason}
-          onTogglePause={togglePause}
-          onStopAnimation={stopAnimationManually}
-          onResetAnimation={resetAnimationManually}
-          hasPlayers={players.length > 0}
           description={playDescription}
           onUpdateDescription={setPlayDescription}
         />

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Menu, Users, LogOut, LogIn, BookOpen, UserRound, Sparkles, Share2, ChevronLeft } from 'lucide-react';
+import { Menu, Users, LogOut, LogIn, BookOpen, UserRound, Sparkles, Share2, ChevronLeft, Play as PlayIcon, Pause as PauseIcon, Square, RotateCcw } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { signInWithGoogle, signOutUser } from '../services/auth';
 
@@ -15,6 +15,16 @@ interface HeaderBarProps {
   sequencePlays?: Array<{ id: string; name: string }>;
   currentPlayId?: string | null;
   onOpenSequencePlay?: (playId: string) => void;
+  animationState?: 'IDLE' | 'PLAYING' | 'PAUSED';
+  animationTime?: number;
+  onStartAnimation?: () => void;
+  onStartSequence?: () => void;
+  canStartSequence?: boolean;
+  startSequenceReason?: string;
+  onTogglePause?: () => void;
+  onStopAnimation?: () => void;
+  onResetAnimation?: () => void;
+  hasPlayers?: boolean;
   user: User | null;
 }
 
@@ -30,10 +40,22 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
   sequencePlays = [],
   currentPlayId,
   onOpenSequencePlay,
+  animationState,
+  animationTime = 0,
+  onStartAnimation,
+  onStartSequence,
+  canStartSequence = false,
+  startSequenceReason = '',
+  onTogglePause,
+  onStopAnimation,
+  onResetAnimation,
+  hasPlayers = false,
   user
 }) => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const isSignedIn = Boolean(user && !user.isAnonymous);
+  const isAnimationActive = animationState === 'PLAYING' || animationState === 'PAUSED';
+  const showPlaybackControls = typeof animationState !== 'undefined';
 
   return (
     <header className="flex items-center justify-between px-6 py-3 bg-slate-900 border-b border-slate-800 shrink-0 shadow-lg z-10">
@@ -88,6 +110,59 @@ const HeaderBar: React.FC<HeaderBarProps> = ({
                 </button>
               );
             })}
+          </div>
+        )}
+        {showPlaybackControls && (
+          <div className="ml-3 flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-950/70 px-2 py-1">
+            <div className="px-1">
+              <span className="text-[8px] font-bold text-slate-500 uppercase leading-none tracking-widest">Clock</span>
+              <div className={`text-sm font-mono font-bold leading-none tabular-nums ${animationState === 'PLAYING' ? 'text-emerald-400' : 'text-slate-300'}`}>
+                {animationTime.toFixed(1)}<span className="text-[9px] ml-0.5 opacity-60 font-sans">s</span>
+              </div>
+            </div>
+            {!isAnimationActive ? (
+              <>
+                <button
+                  onClick={onStartAnimation}
+                  disabled={!hasPlayers}
+                  data-tour-id="run-button"
+                  className="px-3 py-1.5 rounded-md text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 flex items-center gap-1.5 transition-all"
+                >
+                  <PlayIcon size={12} fill="white" />
+                  Run
+                </button>
+                <button
+                  onClick={onStartSequence}
+                  disabled={!hasPlayers || !canStartSequence}
+                  title={startSequenceReason}
+                  className="px-2.5 py-1.5 rounded-md text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 transition-all"
+                >
+                  Run Sequence
+                </button>
+                <button
+                  onClick={onResetAnimation}
+                  disabled={!hasPlayers || animationTime === 0}
+                  className="w-7 h-7 rounded-md bg-slate-800 hover:bg-slate-700 flex items-center justify-center transition-all disabled:opacity-50"
+                >
+                  <RotateCcw size={13} />
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={onTogglePause}
+                  className="w-7 h-7 rounded-md bg-amber-600 hover:bg-amber-500 flex items-center justify-center transition-all"
+                >
+                  {animationState === 'PLAYING' ? <PauseIcon size={14} fill="white" /> : <PlayIcon size={14} fill="white" />}
+                </button>
+                <button
+                  onClick={onStopAnimation}
+                  className="w-7 h-7 rounded-md bg-red-600 hover:bg-red-500 flex items-center justify-center transition-all"
+                >
+                  <Square size={14} fill="white" />
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>

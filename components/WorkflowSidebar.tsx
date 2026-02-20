@@ -21,9 +21,6 @@ interface WorkflowSidebarProps {
   onBuildNextPlay: () => void;
   canBuildNextPlay: boolean;
   buildNextPlayReason: string;
-  onBuildPreviousPlay: () => void;
-  canBuildPreviousPlay: boolean;
-  buildPreviousPlayReason: string;
   onUnlinkSequence: () => void;
   canUnlinkSequence: boolean;
   unlinkSequenceReason: string;
@@ -54,9 +51,6 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
   onBuildNextPlay,
   canBuildNextPlay,
   buildNextPlayReason,
-  onBuildPreviousPlay,
-  canBuildPreviousPlay,
-  buildPreviousPlayReason,
   onUnlinkSequence,
   canUnlinkSequence,
   unlinkSequenceReason,
@@ -97,7 +91,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
       {!isStartLocked && (
       <div className={sectionClass} data-tour-id="workflow-offense">
         <div className="flex items-center justify-between">
-          <h3 className={sectionTitle}>Step 1 · Offense</h3>
+          <h3 className={sectionTitle}>Offense</h3>
         </div>
         <div className="mt-3 flex flex-col gap-3">
           <div className={sectionLabel}>Add Players Manually</div>
@@ -175,7 +169,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
       {!isStartLocked && (
       <div className={sectionClass} data-tour-id="workflow-force">
         <div className="flex items-center justify-between">
-          <h3 className={sectionTitle}>Step 2 · Force</h3>
+          <h3 className={sectionTitle}>Force</h3>
         </div>
         <div className="mt-3">
           <div className={sectionLabel}>Force Direction</div>
@@ -190,7 +184,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
       {!isStartLocked && (
       <div className={sectionClass} data-tour-id="workflow-defense">
         <div className="flex items-center justify-between">
-          <h3 className={sectionTitle}>Step 3 · Defense</h3>
+          <h3 className={sectionTitle}>Defense</h3>
         </div>
         <div className="mt-3 flex flex-col gap-3">
           <div className={sectionLabel}>Add Players Manually</div>
@@ -231,7 +225,7 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
 
       <div className={sectionClass} data-tour-id="workflow-draw">
         <div className="flex items-center justify-between">
-          <h3 className={sectionTitle}>Step 4 · Draw Routes</h3>
+          <h3 className={sectionTitle}>Draw Routes</h3>
         </div>
         <p className="mt-2 text-[10px] text-slate-500 leading-relaxed">
           Select any player and click on the field to define routes.
@@ -252,14 +246,6 @@ const WorkflowSidebar: React.FC<WorkflowSidebarProps> = ({
             className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors text-[10px] font-bold tracking-widest uppercase bg-indigo-500/90 hover:bg-indigo-400 text-indigo-950 border-indigo-500/60 disabled:opacity-50"
           >
             Create Next Play in Sequence
-          </button>
-          <button
-            onClick={onBuildPreviousPlay}
-            disabled={!canBuildPreviousPlay}
-            title={buildPreviousPlayReason || 'Create a previous play step and link this play after it'}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-colors text-[10px] font-bold tracking-widest uppercase bg-slate-700 hover:bg-slate-600 text-slate-100 border-slate-600 disabled:opacity-50"
-          >
-            Create Previous Play
           </button>
           <button
             onClick={onUnlinkSequence}

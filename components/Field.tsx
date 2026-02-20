@@ -1,5 +1,5 @@
 
-import React, { useRef, useState, useMemo } from 'react';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { Player, InteractionMode, Point, Force } from '../types';
 
 interface FieldProps {
@@ -24,6 +24,7 @@ interface FieldProps {
   throwTargetPoint?: Point | null;
   isSelectingThrowTarget?: boolean;
   discPath?: Point[] | null;
+  onAnimatedFrame?: (positionsByKey: Record<string, Point>, holderKey: string | null) => void;
 }
 
 const FIELD_WIDTH = 40; // yards
@@ -54,7 +55,8 @@ const Field: React.FC<FieldProps> = ({
   highlightPlayerId,
   throwTargetPoint,
   isSelectingThrowTarget = false,
-  discPath
+  discPath,
+  onAnimatedFrame
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -160,6 +162,14 @@ const Field: React.FC<FieldProps> = ({
     if (currentForce === 'away') return 3;
     if (currentForce === 'middle') return x < fieldMidX ? 3 : -3;
     return x < fieldMidX ? -3 : 3;
+  };
+
+  const getMarkSideSign = (x: number, currentForce: Force) => {
+    const fieldMidX = FIELD_WIDTH / 2;
+    if (currentForce === 'home') return 1; // mark stands away side to force home
+    if (currentForce === 'away') return -1; // mark stands home side to force away
+    if (currentForce === 'middle') return x < fieldMidX ? -1 : 1;
+    return x < fieldMidX ? 1 : -1;
   };
 
   const getBreakXOffset = (x: number, magnitude: number, currentForce: Force) => {
@@ -299,18 +309,16 @@ const Field: React.FC<FieldProps> = ({
         : { x: targetOffensePos.x, y: targetOffensePos.y };
 
       if (currentDiscHolderId && targetOffense.id === currentDiscHolderId) {
-        const markSideSign = -Math.sign(getForceXOffset(targetOffensePos.x, force)) || 1;
+        const markSideSign = getMarkSideSign(targetOffensePos.x, force);
         const MARK_FORCE_OFFSET = 2.2;
         const MARK_BACK_OFFSET = 0.8;
         const MIN_MARK_DISTANCE = 2.35;
-        let base = desiredFromAnchor;
-        const lateral = (base.x - targetOffensePos.x) * markSideSign;
-        if (lateral < 0.2) {
-          base = {
-            x: targetOffensePos.x + markSideSign * MARK_FORCE_OFFSET,
-            y: targetOffensePos.y - MARK_BACK_OFFSET
-          };
-        }
+        // For the mark, chase a canonical force-side position relative to
+        // the disc-holder instead of preserving initial tracking offset.
+        const base = {
+          x: targetOffensePos.x + markSideSign * MARK_FORCE_OFFSET,
+          y: targetOffensePos.y - MARK_BACK_OFFSET
+        };
         const dx = base.x - targetOffensePos.x;
         const dy = base.y - targetOffensePos.y;
         const dist = Math.hypot(dx, dy);
@@ -524,6 +532,19 @@ const Field: React.FC<FieldProps> = ({
 
   const getAnimatedPosition = (player: Player): Point => animatedPositions.get(player.id) ?? { x: player.x, y: player.y };
 
+  useEffect(() => {
+    if (!onAnimatedFrame) return;
+    const byKey: Record<string, Point> = {};
+    players.forEach((player) => {
+      const key = `${player.team}:${player.label}`;
+      const pos = animatedPositions.get(player.id) ?? { x: player.x, y: player.y };
+      byKey[key] = pos;
+    });
+    const holder = discHolderId ? players.find((p) => p.id === discHolderId) : undefined;
+    const holderKey = holder ? `${holder.team}:${holder.label}` : null;
+    onAnimatedFrame(byKey, holderKey);
+  }, [animatedPositions, players, discHolderId, onAnimatedFrame]);
+
   const w = FIELD_WIDTH * SCALE, h = FIELD_HEIGHT * SCALE, ez = ENDZONE_DEPTH * SCALE;
   const handleDrop = (clientX: number, clientY: number, payload: string) => {
     if (isStartLocked) return;
@@ -572,6 +593,9 @@ const Field: React.FC<FieldProps> = ({
         <div className="px-0.5 py-10 rounded-full border border-slate-700/50 text-slate-500 text-[10px] font-bold tracking-[0.5em] uppercase" style={{ writingMode: 'vertical-lr', transform: 'rotate(180deg)' }}>HOME SIDELINE</div>
       </div>
       <div className="flex flex-col items-center">
+        <div className="mb-2 rounded-md border border-slate-700 bg-slate-900/70 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.15em] text-slate-200">
+          Force: {force === 'home' ? 'Home \u2190' : force === 'away' ? 'Away \u2192' : force === 'middle' ? 'Middle' : 'Sideline'}
+        </div>
         <div className="relative shadow-2xl ring-1 ring-slate-800 rounded-sm">
           <svg
             ref={svgRef}
